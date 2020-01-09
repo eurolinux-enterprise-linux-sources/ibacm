@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2009-2010 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2013 Mellanox Technologies LTD. All rights reserved.
  *
  * This software is available to you under the OpenIB.org BSD license
  * below:
@@ -42,6 +43,7 @@
 #include <infiniband/verbs.h>
 #include <infiniband/acm.h>
 #include "libacm.h"
+#include "acm_util.h"
 
 static char *dest_dir = ACM_CONF_DIR;
 static char *addr_file = ACM_ADDR_FILE;
@@ -55,6 +57,7 @@ static char *src_arg;
 static char addr_type = 'u';
 static int verify;
 static int nodelay;
+static int repetitions = 1;
 
 enum perf_query_output {
 	PERF_QUERY_NONE,
@@ -84,6 +87,7 @@ static void show_usage(char *program)
 	printf("   [-c]             - read ACM cached data only\n");
 	printf("   [-P]             - query performance data from destination service\n");
 	printf("   [-S svc_addr]    - address of ACM service, default: local service\n");
+	printf("   [-C repetitions] - repeat count for resolution\n");
 	printf("usage 2: %s\n", program);
 	printf("Generate default ibacm service configuration and option files\n");
 	printf("   -A [addr_file]   - generate local address configuration file\n");
@@ -97,7 +101,7 @@ static void show_usage(char *program)
 
 static void gen_opts_temp(FILE *f)
 {
-	fprintf(f, "# InfiniBand Multicast Communication Manager for clusters configuration file\n");
+	fprintf(f, "# InfiniBand Communication Manager Assistant for clusters configuration file\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Use ib_acme utility with -O option to automatically generate a sample\n");
 	fprintf(f, "# ibacm_opts.cfg file for the current system.\n");
@@ -214,10 +218,10 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "\n");
 	fprintf(f, "# send_depth:\n");
 	fprintf(f, "# Specifies the number of outstanding send operations that can\n");
-	fprintf(f, "# be in progress simultaneously.  A larger send depth consumes\n");
-	fprintf(f, "# more system resources, but increases subnet load.  The send_depth\n");
-	fprintf(f, "# is in addition to resolve_depth and sa_depth, and limits the\n");
-	fprintf(f, "# transfer of responses.\n");
+	fprintf(f, "# be in progress simultaneously.  A larger send depth allows for\n");
+	fprintf(f, "# greater parallelism, but consumes more system resources and subnet load.\n");
+	fprintf(f, "# The send_depth is in addition to resolve_depth and sa_depth, and limits\n");
+	fprintf(f, "# the transfer of responses.\n");
 	fprintf(f, "\n");
 	fprintf(f, "send_depth 1\n");
 	fprintf(f, "\n");
@@ -244,6 +248,42 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "\n");
 	fprintf(f, "min_rate 10\n");
 	fprintf(f, "\n");
+	fprintf(f, "# route_preload:\n");
+	fprintf(f, "# Specifies if the ACM routing cache should be preloaded, or built on demand.\n");
+	fprintf(f, "# If preloaded, indicates the method used to build the cache.\n");
+	fprintf(f, "# Supported preload values are:\n");
+	fprintf(f, "# none - The routing cache is not pre-built (default)\n");
+	fprintf(f, "# opensm_full_v1 - OpenSM 'full' path records dump file format (version 1)\n");
+	fprintf(f, "\n");
+	fprintf(f, "route_preload none\n");
+	fprintf(f, "\n");
+	fprintf(f, "# route_data_file:\n");
+	fprintf(f, "# Specifies the location of the route data file to use when preloading\n");
+	fprintf(f, "# the ACM cache.  This option is only valid if route_preload\n");
+	fprintf(f, "# indicates that routing data should be read from a file.\n");
+	fprintf(f, "# Default is ACM_CONF_DIR/ibacm_route.data\n");
+	fprintf(f, "# route_data_file /etc/rdma/ibacm_route.data\n");
+	fprintf(f, "\n");
+	fprintf(f, "# addr_preload:\n");
+	fprintf(f, "# Specifies if the ACM address cache should be preloaded, or built on demand.\n");
+	fprintf(f, "# If preloaded, indicates the method used to build the cache.\n");
+	fprintf(f, "# Supported preload values are:\n");
+	fprintf(f, "# none - The address cache is not pre-built (default)\n");
+	fprintf(f, "# acm_hosts - ACM address to GID file format\n");
+	fprintf(f, "\n");
+	fprintf(f, "addr_preload none\n");
+	fprintf(f, "\n");
+	fprintf(f, "# addr_data_file:\n");
+	fprintf(f, "# Specifies the location of the address data file to use when preloading\n");
+	fprintf(f, "# the ACM cache.  This option is only valid if addr_preload\n");
+	fprintf(f, "# indicates that address data should be read from a file.\n");
+	fprintf(f, "# Default is ACM_CONF_DIR/ibacm_hosts.data\n");
+	fprintf(f, "# addr_data_file /etc/rdma/ibacm_hosts.data\n");
+	fprintf(f, "\n");
+	fprintf(f, "# support_ips_in_addr_cfg:\n");
+	fprintf(f, "# If 1 continue to read IP addresses from ibacm_addr.cfg\n");
+	fprintf(f, "# Default is 0 \"no\"\n");
+	fprintf(f, "# support_ips_in_addr_cfg 0\n");
 }
 
 static int open_dir(void)
@@ -275,15 +315,17 @@ static void gen_addr_temp(FILE *f)
 {
 	fprintf(f, "# InfiniBand Communication Management Assistant for clusters address file\n");
 	fprintf(f, "#\n");
-	fprintf(f, "# Use ib_acme utility with -G option to automatically generate a sample\n");
+	fprintf(f, "# Use ib_acme utility with -A option to automatically generate a sample\n");
 	fprintf(f, "# ibacm_addr.cfg file for the current system.\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Entry format is:\n");
 	fprintf(f, "# address device port pkey\n");
 	fprintf(f, "#\n");
+	fprintf(f, "# NOTE: IP addresses are now automatically read and monitored on the system.\n");
+	fprintf(f, "#       Therefore they are no longer required in this file.\n");
+	fprintf(f, "#\n");
 	fprintf(f, "# The address may be one of the following:\n");
 	fprintf(f, "# host_name - ascii character string, up to 31 characters\n");
-	fprintf(f, "# address - IPv4 or IPv6 formatted address\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# device name - struct ibv_device name\n");
 	fprintf(f, "# port number - valid port number on device (numbering starts at 1)\n");
@@ -295,8 +337,6 @@ static void gen_addr_temp(FILE *f)
 	fprintf(f, "# node31      ibv_device0 1 default\n");
 	fprintf(f, "# node31-1    ibv_device0 1 0x00FF\n");
 	fprintf(f, "# node31-2    ibv_device0 2 0x00FF\n");
-	fprintf(f, "# 192.168.0.1 ibv_device0 1 0xFFFF\n");
-	fprintf(f, "# 192.168.0.2 ibv_device0 2 default\n");
 }
 
 static int open_verbs(void)
@@ -318,7 +358,7 @@ static int open_verbs(void)
 
 	for (i = 0; i < dev_cnt; i++) {
 		verbs[i] = ibv_open_device(dev_array[i]);
-		if (!verbs) {
+		if (!verbs[i]) {
 			printf("ibv_open_device - failed to open device\n");
 			ret = -1;
 			goto err2;
@@ -413,12 +453,6 @@ static int gen_addr(void)
 		goto out2;
 	}
 
-	ret = gen_addr_ip(f);
-	if (ret) {
-		printf("Failed to auto generate IP addresses in config file\n");
-		goto out2;
-	}
-
 out2:
 	close_verbs();
 out1:
@@ -460,34 +494,55 @@ static uint32_t get_resolve_flags()
 	return flags;
 }
 
+static int inet_any_pton(char *addr, struct sockaddr *sa)
+{
+	struct sockaddr_in *sin;
+	struct sockaddr_in6 *sin6;
+	int ret;
+
+	sin = (struct sockaddr_in *) sa;
+	sa->sa_family = AF_INET;
+	ret = inet_pton(AF_INET, addr, &sin->sin_addr);
+	if (ret <= 0) {
+		sin6 = (struct sockaddr_in6 *) sa;
+		sa->sa_family = AF_INET6;
+		ret = inet_pton(AF_INET6, src_addr, &sin6->sin6_addr);
+	}
+
+	return ret;
+}
+
 static int resolve_ip(struct ibv_path_record *path)
 {
 	struct ibv_path_data *paths;
-	struct sockaddr_in src, dest;
+	struct sockaddr_storage src, dest;
 	struct sockaddr *saddr;
 	int ret, count;
 
 	if (src_addr) {
-		src.sin_family = AF_INET;
-		ret = inet_pton(AF_INET, src_addr, &src.sin_addr);
+		saddr = (struct sockaddr *) &src;
+		ret = inet_any_pton(src_addr, saddr);
 		if (ret <= 0) {
 			printf("inet_pton error on source address (%s): 0x%x\n", src_addr, ret);
 			return -1;
 		}
-		saddr = (struct sockaddr *) &src;
 	} else {
 		saddr = NULL;
 	}
 
-	dest.sin_family = AF_INET;
-	ret = inet_pton(AF_INET, dest_addr, &dest.sin_addr);
+	ret = inet_any_pton(dest_addr, (struct sockaddr *) &dest);
 	if (ret <= 0) {
 		printf("inet_pton error on destination address (%s): 0x%x\n", dest_addr, ret);
 		return -1;
 	}
 
+	if (src_addr && src.ss_family != dest.ss_family) {
+		printf("source and destination address families don't match\n");
+		return -1;
+	}
+
 	ret = ib_acm_resolve_ip(saddr, (struct sockaddr *) &dest,
-		&paths, &count, get_resolve_flags());
+		&paths, &count, get_resolve_flags(), (repetitions == 1));
 	if (ret) {
 		printf("ib_acm_resolve_ip failed: %s\n", strerror(errno));
 		return ret;
@@ -503,7 +558,7 @@ static int resolve_name(struct ibv_path_record *path)
 	struct ibv_path_data *paths;
 	int ret, count;
 
-	ret = ib_acm_resolve_name(src_addr, dest_addr, &paths, &count, get_resolve_flags());
+	ret = ib_acm_resolve_name(src_addr, dest_addr, &paths, &count, get_resolve_flags(), (repetitions == 1));
 	if (ret) {
 		printf("ib_acm_resolve_name failed: %s\n", strerror(errno));
 		return ret;
@@ -617,7 +672,7 @@ static void resolve(char *svc)
 {
 	char **dest_list, **src_list;
 	struct ibv_path_record path;
-	int ret, d = 0, s = 0;
+	int ret = 0, d = 0, s = 0, i;
 	char dest_type;
 
 	dest_list = parse(dest_arg, NULL);
@@ -637,23 +692,25 @@ static void resolve(char *svc)
 			printf("Destination: %s\n", dest_addr);
 			if (src_addr)
 				printf("Source: %s\n", src_addr);
-			switch (dest_type) {
-			case 'i':
-				ret = resolve_ip(&path);
-				break;
-			case 'n':
-				ret = resolve_name(&path);
-				break;
-			case 'l':
-				memset(&path, 0, sizeof path);
-				ret = resolve_lid(&path);
-				break;
-			case 'g':
-				memset(&path, 0, sizeof path);
-				ret = resolve_gid(&path);
-				break;
-			default:
-				break;
+			for (i = 0; i < repetitions; i++) {
+				switch (dest_type) {
+				case 'i':
+					ret = resolve_ip(&path);
+					break;
+				case 'n':
+					ret = resolve_name(&path);
+					break;
+				case 'l':
+					memset(&path, 0, sizeof path);
+					ret = resolve_lid(&path);
+					break;
+				case 'g':
+					memset(&path, 0, sizeof path);
+					ret = resolve_gid(&path);
+					break;
+				default:
+					break;
+				}
 			}
 
 			if (!ret)
@@ -757,7 +814,7 @@ int CDECL_FUNC main(int argc, char **argv)
 	if (ret)
 		goto out;
 
-	while ((op = getopt(argc, argv, "f:s:d:vcA::O::D:P::S:V")) != -1) {
+	while ((op = getopt(argc, argv, "f:s:d:vcA::O::D:P::S:C:V")) != -1) {
 		switch (op) {
 		case 'f':
 			addr_type = optarg[0];
@@ -798,6 +855,11 @@ int CDECL_FUNC main(int argc, char **argv)
 			break;
 		case 'S':
 			svc_arg = optarg;
+			break;
+		case 'C':
+			repetitions = atoi(optarg);
+			if (!repetitions)
+				repetitions = 1;
 			break;
 		case 'V':
 			verbose = 1;

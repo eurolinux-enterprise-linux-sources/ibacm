@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2009 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2013 Mellanox Technologies LTD. All rights reserved.
  *
  * This software is available to you under the OpenFabrics.org BSD license
  * below:
@@ -118,7 +119,7 @@ static inline void event_init(event_t *e)
 	pthread_mutex_init(&e->mutex, NULL);
 }
 #define event_signal(e)	pthread_cond_signal(&(e)->cond)
-static inline int event_wait(event_t *e, int timeout) 
+static inline int event_wait(event_t *e, int timeout)
 {
 	struct timeval curtime;
 	struct timespec wait;
@@ -167,4 +168,3 @@ static inline int beginthread(void (*func)(void *), void *arg)
 }
 
 #endif /* OSD_H */
-

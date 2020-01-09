@@ -1,7 +1,7 @@
 /*
- * Copyright (c) 2009 Intel Corporation. All rights reserved.
+ * Copyright (c) 2014 Intel Corporation.  All rights reserved.
  *
- * This software is available to you under the OpenIB.org BSD license
+ * This software is available to you under the OpenFabrics.org BSD license
  * below:
  *
  *     Redistribution and use in source and binary forms, with or
@@ -27,54 +27,30 @@
  * SOFTWARE.
  */
 
-#ifndef _DLIST_H_
-#define _DLIST_H_
+#if !defined(ACM_IF_H)
+#define ACM_IF_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <infiniband/verbs.h>
 
-typedef struct _DLIST_ENTRY {
-	struct _DLIST_ENTRY	*Next;
-	struct _DLIST_ENTRY	*Prev;
+#ifdef ACME_PRINTS
 
-}	DLIST_ENTRY;
+#define acm_log(level, format, ...) \
+	printf(format, ## __VA_ARGS__)
 
-static void DListInit(DLIST_ENTRY *pHead)
-{
-	pHead->Next = pHead;
-	pHead->Prev = pHead;
-}
+#else /* !ACME_PRINTS */
+#define acm_log(level, format, ...) \
+	acm_write(level, "%s: "format, __func__, ## __VA_ARGS__)
 
-static int DListEmpty(DLIST_ENTRY *pHead)
-{
-	return pHead->Next == pHead;
-}
+void acm_write(int level, const char *format, ...);
+#endif /* ACME_PRINTS */
 
-static void DListInsertAfter(DLIST_ENTRY *pNew, DLIST_ENTRY *pHead)
-{
-	pNew->Next = pHead->Next;
-	pNew->Prev = pHead;
-	pHead->Next->Prev = pNew;
-	pHead->Next = pNew;
-}
+int acm_if_is_ib(char *ifname);
+int acm_if_get_pkey(char *ifname, uint16_t *pkey);
+int acm_if_get_sgid(char *ifname, union ibv_gid *sgid);
 
-static void DListInsertBefore(DLIST_ENTRY *pNew, DLIST_ENTRY *pHead)
-{
-	DListInsertAfter(pNew, pHead->Prev);
-}
+typedef void (*acm_if_iter_cb)(char *ifname, union ibv_gid *gid, uint16_t pkey,
+				uint8_t addr_type, uint8_t *addr, size_t addr_len,
+				char *addr_name, void *ctx);
+int acm_if_iter_sys(acm_if_iter_cb cb, void *ctx);
 
-#define DListInsertHead DListInsertAfter
-#define DListInsertTail DListInsertBefore
-
-static void DListRemove(DLIST_ENTRY *pEntry)
-{
-	pEntry->Prev->Next = pEntry->Next;
-	pEntry->Next->Prev = pEntry->Prev;
-}
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // _DLIST_H_
+#endif /* ACM_IF_H */
