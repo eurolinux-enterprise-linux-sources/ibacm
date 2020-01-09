@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2010 Intel Corporation. All rights reserved.
+ * Copyright (c) 2009-2012 Intel Corporation. All rights reserved.
  *
  * This software is available to you under the OpenIB.org BSD license
  * below:
@@ -90,6 +90,8 @@ struct acm_dest {
 	lock_t                 lock;
 	enum acm_state         state;
 	atomic_t               refcnt;
+	uint64_t	       addr_timeout;
+	uint64_t	       route_timeout;
 	uint8_t                addr_type;
 };
 
@@ -205,13 +207,16 @@ static atomic_t counter[ACM_MAX_COUNTER];
 /*
  * Service options - may be set through acm_opts file.
  */
-static char *opts_file = "/etc/ibacm/acm_opts.cfg";
-static char *addr_file = "/etc/ibacm/acm_addr.cfg";
+static char *acme = BINDIR "/ib_acme -A";
+static char *opts_file = ACM_CONF_DIR "/" ACM_OPTS_FILE;
+static char *addr_file = ACM_CONF_DIR "/" ACM_ADDR_FILE;
 static char log_file[128] = "/var/log/ibacm.log";
 static int log_level = 0;
-static char lock_file[128] = "/var/lock/ibacm.pid";
+static char lock_file[128] = "/var/run/ibacm.pid";
 static enum acm_addr_prot addr_prot = ACM_ADDR_PROT_ACM;
-static enum acm_route_prot route_prot = ACM_ROUTE_PROT_ACM;
+static int addr_timeout = 1440;
+static enum acm_route_prot route_prot = ACM_ROUTE_PROT_SA;
+static int route_timeout = -1;
 static enum acm_loopback_prot loopback_prot = ACM_LOOPBACK_PROT_LOCAL;
 static short server_port = 6125;
 static int timeout = 2000;
@@ -267,7 +272,7 @@ acm_format_name(int level, char *name, size_t name_size,
 	case ACM_EP_INFO_PATH:
 		path = (struct ibv_path_record *) addr;
 		if (path->dlid) {
-			sprintf(name, "SLID(%d) DLID(%d)",
+			snprintf(name, name_size, "SLID(%u) DLID(%u)",
 				ntohs(path->slid), ntohs(path->dlid));
 		} else {
 			acm_format_name(level, name, name_size, ACM_ADDRESS_GID,
@@ -275,7 +280,7 @@ acm_format_name(int level, char *name, size_t name_size,
 		}
 		break;
 	case ACM_ADDRESS_LID:
-		sprintf(name, "LID(%d)", ntohs(*((uint16_t *) addr)));
+		snprintf(name, name_size, "LID(%u)", ntohs(*((uint16_t *) addr)));
 		break;
 	default:
 		strcpy(name, "Unknown");
@@ -762,6 +767,7 @@ static void acm_process_join_resp(struct acm_ep *ep, struct ib_user_mad *umad)
 		}
 	}
 
+	atomic_set(&dest->refcnt, 1);
 	dest->state = ACM_READY;
 	acm_log(1, "join successful\n");
 out:
@@ -803,6 +809,8 @@ acm_record_acm_route(struct acm_ep *ep, struct acm_dest *dest)
 	dest->path = ep->mc_dest[i].path;
 	dest->path.dgid = dest->av.grh.dgid;
 	dest->path.dlid = htons(dest->av.dlid);
+	dest->addr_timeout = time_stamp_min() + (unsigned) addr_timeout;
+	dest->route_timeout = time_stamp_min() + (unsigned) route_timeout;
 	dest->state = ACM_READY;
 	return ACM_STATUS_SUCCESS;
 }
@@ -949,9 +957,13 @@ acm_record_path_addr(struct acm_ep *ep, struct acm_dest *dest,
 {
 	acm_log(2, "%s\n", dest->name);
 	dest->path.pkey = htons(ep->pkey);
-	dest->path.sgid = path->sgid;
 	dest->path.dgid = path->dgid;
-	dest->path.slid = path->slid;
+	if (path->slid || !ib_any_gid(&path->sgid)) {
+		dest->path.sgid = path->sgid;
+		dest->path.slid = path->slid;
+	} else {
+		dest->path.slid = htons(ep->port->lid);
+	}
 	dest->path.dlid = path->dlid;
 	dest->state = ACM_ADDR_RESOLVED;
 }
@@ -1105,6 +1117,9 @@ acm_dest_sa_resp(struct acm_send_msg *msg, struct ibv_wc *wc, struct acm_mad *ma
 	if (!status) {
 		memcpy(&dest->path, sa_mad->data, sizeof(dest->path));
 		acm_init_path_av(msg->ep->port, dest);
+		dest->addr_timeout = time_stamp_min() + (unsigned) addr_timeout;
+		dest->route_timeout = time_stamp_min() + (unsigned) route_timeout;
+		acm_log(2, "timeout addr %llu route %llu\n", dest->addr_timeout, dest->route_timeout);
 		dest->state = ACM_READY;
 	} else {
 		dest->state = ACM_INIT;
@@ -1745,10 +1760,33 @@ static void acm_svr_accept(void)
 static int
 acm_is_path_from_port(struct acm_port *port, struct ibv_path_record *path)
 {
-	if (ib_any_gid(&path->sgid)) {
+	union ibv_gid gid;
+	uint8_t i;
+
+	if (!ib_any_gid(&path->sgid)) {
+		return (acm_gid_index(port, &path->sgid) < port->gid_cnt);
+	}
+
+	if (path->slid) {
 		return (port->lid == (ntohs(path->slid) & port->lid_mask));
 	}
-	return (acm_gid_index(port, &path->sgid) < port->gid_cnt);
+
+	if (ib_any_gid(&path->dgid)) {
+		return 1;
+	}
+
+	if (acm_gid_index(port, &path->dgid) < port->gid_cnt) {
+		return 1;
+	}
+
+	for (i = 0; i < port->gid_cnt; i++) {
+		ibv_query_gid(port->dev->verbs, port->port_num, i, &gid);
+		if (gid.global.subnet_prefix == path->dgid.global.subnet_prefix) {
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 static struct acm_ep *
@@ -2056,6 +2094,22 @@ acm_svr_queue_req(struct acm_dest *dest, struct acm_client *client,
 	return ACM_STATUS_SUCCESS;
 }
 
+static int acm_dest_timeout(struct acm_dest *dest)
+{
+	uint64_t timestamp = time_stamp_min();
+
+	if (timestamp > dest->addr_timeout) {
+		acm_log(2, "%s address timed out\n", dest->name);
+		dest->state = ACM_INIT;
+		return 1;
+	} else if (timestamp > dest->route_timeout) {
+		acm_log(2, "%s route timed out\n", dest->name);
+		dest->state = ACM_ADDR_RESOLVED;
+		return 1;
+	}
+	return 0;
+}
+
 static int
 acm_svr_resolve_dest(struct acm_client *client, struct acm_msg *msg)
 {
@@ -2098,8 +2152,11 @@ acm_svr_resolve_dest(struct acm_client *client, struct acm_msg *msg)
 	}
 
 	lock_acquire(&dest->lock);
+test:
 	switch (dest->state) {
 	case ACM_READY:
+		if (acm_dest_timeout(dest))
+			goto test;
 		acm_log(2, "request satisfied from local cache\n");
 		atomic_inc(&counter[ACM_CNTR_ROUTE_CACHE]);
 		status = ACM_STATUS_SUCCESS;
@@ -2193,8 +2250,11 @@ acm_svr_resolve_path(struct acm_client *client, struct acm_msg *msg)
 	}
 
 	lock_acquire(&dest->lock);
+test:
 	switch (dest->state) {
 	case ACM_READY:
+		if (acm_dest_timeout(dest))
+			goto test;
 		acm_log(2, "request satisfied from local cache\n");
 		atomic_inc(&counter[ACM_CNTR_ROUTE_CACHE]);
 		status = ACM_STATUS_SUCCESS;
@@ -2484,9 +2544,9 @@ static FILE *acm_open_addr_file(void)
 	if ((f = fopen(addr_file, "r")))
 		return f;
 
-	acm_log(0, "notice - generating acm_addr.cfg file\n");
-	if (!(f = popen("ib_acme -A", "r"))) {
-		acm_log(0, "ERROR - cannot generate acm_addr.cfg\n");
+	acm_log(0, "notice - generating %s file\n", addr_file);
+	if (!(f = popen(acme, "r"))) {
+		acm_log(0, "ERROR - cannot generate %s\n", addr_file);
 		return NULL;
 	}
 	pclose(f);
@@ -2591,6 +2651,8 @@ static int acm_init_ep_loopback(struct acm_ep *ep)
 		dest->path.rate = (uint8_t) ep->port->rate;
 
 		dest->remote_qpn = ep->qp->qp_num;
+		dest->addr_timeout = (uint64_t) ~0ULL;
+		dest->route_timeout = (uint64_t) ~0ULL;
 		dest->state = ACM_READY;
 		acm_put_dest(dest);
 		acm_log(1, "added loopback dest %s\n", dest->name);
@@ -2770,7 +2832,8 @@ static void acm_port_up(struct acm_port *port)
 
 	port->mtu = attr.active_mtu;
 	port->rate = acm_get_rate(attr.active_width, attr.active_speed);
-	port->subnet_timeout = 1 << (attr.subnet_timeout - 8);
+	if (attr.subnet_timeout >= 8)
+		port->subnet_timeout = 1 << (attr.subnet_timeout - 8);
 	for (port->gid_cnt = 0;; port->gid_cnt++) {
 		ret = ibv_query_gid(port->dev->verbs, port->port_num, port->gid_cnt, &gid);
 		if (ret || !gid.global.interface_id)
@@ -3025,8 +3088,12 @@ static void acm_set_options(void)
 			strcpy(lock_file, value);
 		else if (!stricmp("addr_prot", opt))
 			addr_prot = acm_convert_addr_prot(value);
+		else if (!stricmp("addr_timeout", opt))
+			addr_timeout = atoi(value);
 		else if (!stricmp("route_prot", opt))
 			route_prot = acm_convert_route_prot(value);
+		else if (!strcmp("route_timeout", opt))
+			route_timeout = atoi(value);
 		else if (!stricmp("loopback_prot", opt))
 			loopback_prot = acm_convert_loopback_prot(value);
 		else if (!stricmp("server_port", opt))
@@ -3057,7 +3124,9 @@ static void acm_log_options(void)
 	acm_log(0, "log level %d\n", log_level);
 	acm_log(0, "lock file %s\n", lock_file);
 	acm_log(0, "address resolution %d\n", addr_prot);
+	acm_log(0, "address timeout %d\n", addr_timeout);
 	acm_log(0, "route resolution %d\n", route_prot);
+	acm_log(0, "route timeout %d\n", route_timeout);
 	acm_log(0, "loopback resolution %d\n", loopback_prot);
 	acm_log(0, "server_port %d\n", server_port);
 	acm_log(0, "timeout %d ms\n", timeout);
@@ -3100,7 +3169,7 @@ static int acm_open_lock_file(void)
 		return -1;
 	}
 
-	sprintf(pid, "%d\n", getpid());
+	snprintf(pid, sizeof pid, "%d\n", getpid());
 	write(lock_fd, pid, strlen(pid));
 	return 0;
 }
@@ -3112,8 +3181,6 @@ static void daemonize(void)
 	pid = fork();
 	if (pid)
 		exit(pid < 0);
-
-	umask(0);
 
 	sid = setsid();
 	if (sid < 0)
@@ -3133,9 +3200,9 @@ static void show_usage(char *program)
 	printf("   [-D]             - run as a daemon (default)\n");
 	printf("   [-P]             - run as a standard process\n");
 	printf("   [-A addr_file]   - address configuration file\n");
-	printf("                      (default %s/%s\n", ACM_DEST_DIR, ACM_ADDR_FILE);
+	printf("                      (default %s/%s\n", ACM_CONF_DIR, ACM_ADDR_FILE);
 	printf("   [-O option_file] - option configuration file\n");
-	printf("                      (default %s/%s\n", ACM_DEST_DIR, ACM_OPTS_FILE);
+	printf("                      (default %s/%s\n", ACM_CONF_DIR, ACM_OPTS_FILE);
 }
 
 int CDECL_FUNC main(int argc, char **argv)

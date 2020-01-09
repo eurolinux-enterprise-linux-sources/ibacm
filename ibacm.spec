@@ -1,14 +1,12 @@
 Name: ibacm
-Version: 1.0.5
-Release: 3%{?dist}
+Version: 1.0.8
+Release: 0.git7a3adb7%{?dist}
 Summary: InfiniBand Communication Manager Assistant
 Group: System Environment/Daemons
 License: GPLv2 or BSD
 Url: http://www.openfabrics.org/
-Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}.tar.gz
+Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}-0.git7a3adb7.tar.gz
 Source1: ibacm.init
-Patch0: ibacm-1.0.5-make.patch
-Patch1: ibacm-1.0.5-conf.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires: libibverbs-devel >= 1.1-1, autoconf, libtool, libibumad-devel
 Requires(post): chkconfig
@@ -43,20 +41,16 @@ wish to make use of this header file.
 
 %prep
 %setup -q -n %{name}-%{version}
-%patch0 -p1 -b .make
-%patch1 -p1 -b .conf
 
 %build
-aclocal -I config && libtoolize --force --copy && autoheader && \
-	automake --foreign --add-missing --copy && autoconf
+./autogen.sh
 %configure CFLAGS="$CXXFLAGS -fno-strict-aliasing" LDFLAGS=-lpthread
-mv man/ib_acm.1 man/ibacm.1
-mv man/ib_acm.7 man/ibacm.7
 make %{?_smp_mflags}
 
 %install
-rm -rf $RPM_BUILD_ROOT
+rm -rf %{buildroot}
 make DESTDIR=%{buildroot} install
+rm -fr %{buildroot}/etc/init.d
 install -D -m 755 %{SOURCE1} %{buildroot}%{_initrddir}/ibacm
 
 %clean
@@ -86,6 +80,10 @@ fi
 %{_includedir}/infiniband/acm.h
 
 %changelog
+* Mon Oct 15 2012 Doug Ledford <dledford@redhat.com> - 1.0.8-0.git7a3adb7
+- Update to latest upstream via git repo
+- Resolves: bz866222, bz866223
+
 * Thu Apr 05 2012 Doug Ledford <dledford@redhat.com> - 1.0.5-3
 - Until the next upstream release, the pid file is in a wonky location.
   Make the init script know about that location so we can stop properly.

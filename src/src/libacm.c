@@ -75,6 +75,7 @@ int ib_acm_connect(char *dest)
 
 	acm_set_server_port();
 	memset(&hint, 0, sizeof hint);
+	hint.ai_family = AF_INET;
 	hint.ai_protocol = IPPROTO_TCP;
 	ret = getaddrinfo(dest, NULL, &hint, &res);
 	if (ret)
@@ -355,4 +356,22 @@ int ib_acm_query_perf(uint64_t **counters, int *count)
 out:
 	lock_release(&lock);
 	return ret;
+}
+
+const char *ib_acm_cntr_name(int index)
+{
+	static const char *const cntr_name[] = {
+		[ACM_CNTR_ERROR]	= "Error Count",
+		[ACM_CNTR_RESOLVE]	= "Resolve Count",
+		[ACM_CNTR_NODATA]	= "No Data",
+		[ACM_CNTR_ADDR_QUERY]	= "Addr Query Count",
+		[ACM_CNTR_ADDR_CACHE]	= "Addr Cache Count",
+		[ACM_CNTR_ROUTE_QUERY]	= "Route Query Count",
+		[ACM_CNTR_ROUTE_CACHE]	= "Route Cache Count",
+	};
+
+	if (index < ACM_CNTR_ERROR || index > ACM_MAX_COUNTER)
+		return "Unknown";
+
+	return cntr_name[index];
 }

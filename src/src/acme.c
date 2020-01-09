@@ -43,7 +43,7 @@
 #include <infiniband/acm.h>
 #include "libacm.h"
 
-static char *dest_dir = ACM_DEST_DIR;
+static char *dest_dir = ACM_CONF_DIR;
 static char *addr_file = ACM_ADDR_FILE;
 static char *opts_file = ACM_OPTS_FILE;
 
@@ -55,7 +55,13 @@ static char *src_arg;
 static char addr_type = 'u';
 static int verify;
 static int nodelay;
-static int perf_query;
+
+enum perf_query_output {
+	PERF_QUERY_NONE,
+	PERF_QUERY_ROW,
+	PERF_QUERY_COL
+};
+static enum perf_query_output perf_query;
 int verbose;
 
 struct ibv_context **verbs;
@@ -69,7 +75,7 @@ extern char **parse(char *args, int *count);
 static void show_usage(char *program)
 {
 	printf("usage 1: %s\n", program);
-	printf("Query specified ib_acm service for data\n");
+	printf("Query specified ibacm service for data\n");
 	printf("   [-f addr_format] - i(p), n(ame), l(id), g(gid), or u(nspecified)\n");
 	printf("                      address format for -s and -d options, default: 'u'\n");
 	printf("   [-s src_addr]    - source address for path queries\n");
@@ -79,13 +85,13 @@ static void show_usage(char *program)
 	printf("   [-P]             - query performance data from destination service\n");
 	printf("   [-S svc_addr]    - address of ACM service, default: local service\n");
 	printf("usage 2: %s\n", program);
-	printf("Generate default ib_acm service configuration and option files\n");
+	printf("Generate default ibacm service configuration and option files\n");
 	printf("   -A [addr_file]   - generate local address configuration file\n");
 	printf("                      (default is %s)\n", ACM_ADDR_FILE);
-	printf("   -O [opt_file]    - generate local acm_opts.cfg options file\n");
+	printf("   -O [opt_file]    - generate local ibacm_opts.cfg options file\n");
 	printf("                      (default is %s)\n", ACM_OPTS_FILE);
 	printf("   -D dest_dir      - specify destination directory for output files\n");
-	printf("                      (default is %s)\n", ACM_DEST_DIR);
+	printf("                      (default is %s)\n", ACM_CONF_DIR);
 	printf("   -V               - enable verbose output\n");
 }
 
@@ -94,7 +100,7 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "# InfiniBand Multicast Communication Manager for clusters configuration file\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Use ib_acme utility with -O option to automatically generate a sample\n");
-	fprintf(f, "# acm_opts.cfg file for the current system.\n");
+	fprintf(f, "# ibacm_opts.cfg file for the current system.\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Entry format is:\n");
 	fprintf(f, "# name value\n");
@@ -123,7 +129,7 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "# Specifies the location of the ACM lock file used to ensure that only a\n");
 	fprintf(f, "# single instance of ACM is running.\n");
 	fprintf(f, "\n");
-	fprintf(f, "lock_file /var/lock/ibacm.pid\n");
+	fprintf(f, "lock_file /var/run/ibacm.pid\n");
 	fprintf(f, "\n");
 	fprintf(f, "# addr_prot:\n");
 	fprintf(f, "# Default resolution protocol to resolve IP addresses into IB GIDs.\n");
@@ -132,6 +138,14 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "\n");
 	fprintf(f, "addr_prot acm\n");
 	fprintf(f, "\n");
+	fprintf(f, "# addr_timeout:\n");
+	fprintf(f, "# Number of minutes to maintain IP address to GID mapping before\n");
+	fprintf(f, "# repeating address resolution.  A value of -1 indicates that the\n");
+	fprintf(f, "# mapping will not time out.\n");
+	fprintf(f, "# 1 hour = 60, 1 day = 1440, 1 week = 10080, 1 month ~ 43200");
+	fprintf(f, "\n");
+	fprintf(f, "addr_timeout 1440\n");
+	fprintf(f, "\n");
 	fprintf(f, "# route_prot:\n");
 	fprintf(f, "# Default resolution protocol to resolve IB routing information.\n");
 	fprintf(f, "# Supported protocols are:\n");
@@ -139,6 +153,15 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "# acm - Use ACM multicast protocol.\n");
 	fprintf(f, "\n");
 	fprintf(f, "route_prot sa\n");
+	fprintf(f, "\n");
+	fprintf(f, "# route_timeout:\n");
+	fprintf(f, "# Number of minutes to maintain IB routing information before\n");
+	fprintf(f, "# repeating route resolution.  A value of -1 indicates that the\n");
+	fprintf(f, "# mapping will not time out.  However, the route will\n");
+	fprintf(f, "# automatically time out when the address times out.\n");
+	fprintf(f, "# 1 hour = 60, 1 day = 1440, 1 week = 10080, 1 month ~ 43200");
+	fprintf(f, "\n");
+	fprintf(f, "route_timeout -1\n");
 	fprintf(f, "\n");
 	fprintf(f, "# loopback_prot:\n");
 	fprintf(f, "# Address and route resolution protocol to resolve local addresses\n");
@@ -253,7 +276,7 @@ static void gen_addr_temp(FILE *f)
 	fprintf(f, "# InfiniBand Communication Management Assistant for clusters address file\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Use ib_acme utility with -G option to automatically generate a sample\n");
-	fprintf(f, "# acm_addr.cfg file for the current system.\n");
+	fprintf(f, "# ibacm_addr.cfg file for the current system.\n");
 	fprintf(f, "#\n");
 	fprintf(f, "# Entry format is:\n");
 	fprintf(f, "# address device port pkey\n");
@@ -413,13 +436,13 @@ static void show_path(struct ibv_path_record *path)
 	printf("  dgid: %s\n", gid);
 	inet_ntop(AF_INET6, path->sgid.raw, gid, sizeof gid);
 	printf("  sgid: %s\n", gid);
-	printf("  dlid: 0x%x\n", ntohs(path->dlid));
-	printf("  slid: 0x%x\n", ntohs(path->slid));
+	printf("  dlid: %u\n", ntohs(path->dlid));
+	printf("  slid: %u\n", ntohs(path->slid));
 	fl_hop = ntohl(path->flowlabel_hoplimit);
 	printf("  flow label: 0x%x\n", fl_hop >> 8);
 	printf("  hop limit: %d\n", (uint8_t) fl_hop);
 	printf("  tclass: %d\n", path->tclass);
-	printf("  reverisible: %d\n", path->reversible_numpath >> 7);
+	printf("  reversible: %d\n", path->reversible_numpath >> 7);
 	printf("  pkey: 0x%x\n", ntohs(path->pkey));
 	printf("  sl: %d\n", ntohs(path->qosclass_sl) & 0xF);
 	printf("  mtu: %d\n", path->mtu & 0x1F);
@@ -495,7 +518,8 @@ static int resolve_lid(struct ibv_path_record *path)
 {
 	int ret;
 
-	path->slid = htons((uint16_t) atoi(src_addr));
+	if (src_addr)
+		path->slid = htons((uint16_t) atoi(src_addr));
 	path->dlid = htons((uint16_t) atoi(dest_addr));
 	path->reversible_numpath = IBV_PATH_RECORD_REVERSIBLE | 1;
 
@@ -510,16 +534,19 @@ static int resolve_gid(struct ibv_path_record *path)
 {
 	int ret;
 
-	ret = inet_pton(AF_INET6, src_addr, &path->sgid);
-	if (ret <= 0) {
-		printf("inet_pton error on source address (%s): 0x%x\n", src_addr, ret);
-		return ret;
+	if (src_addr) {
+		ret = inet_pton(AF_INET6, src_addr, &path->sgid);
+		if (ret <= 0) {
+			printf("inet_pton error on source address (%s): 0x%x\n",
+			       src_addr, ret);
+			return ret ? ret : -1;
+		}
 	}
 
 	ret = inet_pton(AF_INET6, dest_addr, &path->dgid);
 	if (ret <= 0) {
 		printf("inet_pton error on dest address (%s): 0x%x\n", dest_addr, ret);
-		return ret;
+		return ret ? ret : -1;
 	}
 
 	path->reversible_numpath = IBV_PATH_RECORD_REVERSIBLE | 1;
@@ -646,6 +673,7 @@ static void resolve(char *svc)
 
 static void query_perf(char *svc)
 {
+	static int lables;
 	int ret, cnt, i;
 	uint64_t *counters;
 
@@ -655,10 +683,24 @@ static void query_perf(char *svc)
 		return;
 	}
 
-	printf("%s,", svc);
-	for (i = 0; i < cnt; i++)
-		printf("%llu,", (unsigned long long) counters[i]);
-	printf("\n");
+	if (perf_query == PERF_QUERY_ROW) {
+		if (!lables) {
+			for (i = 0; i < cnt - 1; i++)
+				printf("%s,", ib_acm_cntr_name(i));
+			printf("%s\n", ib_acm_cntr_name(i));
+			lables = 1;
+		}
+		printf("%s,", svc);
+		for (i = 0; i < cnt - 1; i++)
+			printf("%llu,", (unsigned long long) counters[i]);
+		printf("%llu\n", (unsigned long long) counters[i]);
+	} else {
+		printf("%s\n", svc);
+		for (i = 0; i < cnt; i++) {
+			printf("%s : ", ib_acm_cntr_name(i));
+			printf("%llu\n", (unsigned long long) counters[i]);
+		}
+	}
 	ib_acm_free_perf(counters);
 }
 
@@ -671,11 +713,6 @@ static int query_svcs(void)
 	if (!svc_list) {
 		printf("Unable to parse service list argument\n");
 		return -1;
-	}
-
-	if (perf_query) {
-		printf("Destination,Error Count,Resolve Count,No Data,Addr Query Count,"
-			"Addr Cache Count,Route Query Count,Route Cache Count\n");
 	}
 
 	for (i = 0; svc_list[i]; i++) {
@@ -720,7 +757,7 @@ int CDECL_FUNC main(int argc, char **argv)
 	if (ret)
 		goto out;
 
-	while ((op = getopt(argc, argv, "f:s:d:vcA::O::D:PS:V")) != -1) {
+	while ((op = getopt(argc, argv, "f:s:d:vcA::O::D:P::S:V")) != -1) {
 		switch (op) {
 		case 'f':
 			addr_type = optarg[0];
@@ -754,7 +791,10 @@ int CDECL_FUNC main(int argc, char **argv)
 			dest_dir = optarg;
 			break;
 		case 'P':
-			perf_query = 1;
+			if (opt_arg(argc, argv) && !strnicmp("col", opt_arg(argc, argv), 3))
+				perf_query = PERF_QUERY_COL;
+			else
+				perf_query = PERF_QUERY_ROW;
 			break;
 		case 'S':
 			svc_arg = optarg;
