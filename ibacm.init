@@ -10,7 +10,7 @@
 # Default-Start: 2 3 4 5
 # Default-Stop: 0 1 6
 # Required-Start: rdma $network
-# Required-Stop: rdma $network
+# Required-Stop:
 # Should-Start:
 # Should-Stop:
 # Short-Description: Starts and stops the InfiniBand ACM service

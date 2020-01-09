@@ -1,14 +1,15 @@
 Name: ibacm
 Version: 1.0.9
-Release: 0.git49af5a8%{?dist}
+Release: 1%{?dist}
 Summary: InfiniBand Communication Manager Assistant
 Group: System Environment/Daemons
 License: GPLv2 or BSD
-Url: http://www.openfabrics.org/
-Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}-0.git49af5a8.tar.gz
+Url: https://www.openfabrics.org/
+Source: https://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}.tar.gz
 Source1: ibacm.init
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires: libibverbs-devel >= 1.1-1, autoconf, libtool, libibumad-devel
+BuildRequires: libibverbs-devel >= 1.1-1, libibumad-devel
+#BuildRequires: autoconf, libtool
 Requires(post): chkconfig
 Requires(preun): chkconfig
 ExcludeArch: s390 s390x
@@ -43,7 +44,7 @@ wish to make use of this header file.
 %setup -q -n %{name}-%{version}
 
 %build
-./autogen.sh
+#./autogen.sh
 %configure CFLAGS="$CFLAGS -fno-strict-aliasing" LDFLAGS=-lpthread
 make %{?_smp_mflags}
 
@@ -80,6 +81,10 @@ fi
 %{_includedir}/infiniband/acm.h
 
 %changelog
+* Wed Mar 11 2015 Doug Ledford <dledford@redhat.com> - 1.0.9-1
+- Update to official 1.0.9 release
+- Related: bz1119108
+
 * Mon Jun 16 2014 Doug Ledford <dledford@redhat.com> - 1.0.9-0.git3cbbe4e
 - Update to head of git repo to pick up dynamic addressing changes
 - Resolves: bz1056662
