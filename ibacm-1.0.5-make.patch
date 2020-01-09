@@ -1,0 +1,28 @@
+diff -up ibacm-1.0.5/Makefile.am.dist ibacm-1.0.5/Makefile.am
+--- ibacm-1.0.5/Makefile.am.dist	2010-12-10 15:05:18.000000000 -0500
++++ ibacm-1.0.5/Makefile.am	2012-02-28 13:25:36.662261951 -0500
+@@ -3,10 +3,10 @@ INCLUDES = -I$(srcdir)/include -I$(srcdi
+ AM_CFLAGS = -g -Wall -D_GNU_SOURCE
+ 
+ bin_PROGRAMS = util/ib_acme
+-sbin_PROGRAMS = svc/ib_acm
+-svc_ib_acm_SOURCES = src/acm.c
++sbin_PROGRAMS = svc/ibacm
++svc_ibacm_SOURCES = src/acm.c
+ util_ib_acme_SOURCES = src/acme.c linux/acme_linux.c src/libacm.c linux/libacm_linux.c src/parse.c
+-svc_ib_acm_CFLAGS = $(AM_CFLAGS)
++svc_ibacm_CFLAGS = $(AM_CFLAGS)
+ util_ib_acme_CFLAGS = $(AM_CFLAGS)
+ 
+ ibacmincludedir = $(includedir)/infiniband
+@@ -15,8 +15,8 @@ ibacminclude_HEADERS = include/infiniban
+ 
+ man_MANS = \
+ 	man/ib_acme.1 \
+-	man/ib_acm.1 \
+-	man/ib_acm.7
++	man/ibacm.1 \
++	man/ibacm.7
+ 
+ EXTRA_DIST = src/acm_mad.h src/libacm.h \
+ 	     linux/osd.h linux/dlist.h ibacm.spec.in $(man_MANS) acm_opts.cfg \
