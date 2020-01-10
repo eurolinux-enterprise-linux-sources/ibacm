@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2009-2012 Intel Corporation. All rights reserved.
+ * Copyright (c) 2013 Mellanox Technologies LTD. All rights reserved.
  *
  * This software is available to you under the OpenIB.org BSD license
  * below:
@@ -49,6 +50,8 @@
 
 #define src_out     data[0]
 
+#define IB_LID_MCAST_START 0xc000
+
 #define MAX_EP_ADDR 4
 #define MAX_EP_MC   2
 
@@ -72,6 +75,16 @@ enum acm_route_prot {
 enum acm_loopback_prot {
 	ACM_LOOPBACK_PROT_NONE,
 	ACM_LOOPBACK_PROT_LOCAL
+};
+
+enum acm_route_preload {
+	ACM_ROUTE_PRELOAD_NONE,
+	ACM_ROUTE_PRELOAD_OSM_FULL_V1
+};
+
+enum acm_addr_preload {
+	ACM_ADDR_PRELOAD_NONE,
+	ACM_ADDR_PRELOAD_HOSTS
 };
 
 /*
@@ -205,11 +218,13 @@ PER_THREAD char log_data[ACM_MAX_ADDRESS];
 static atomic_t counter[ACM_MAX_COUNTER];
 
 /*
- * Service options - may be set through acm_opts file.
+ * Service options - may be set through ibacm_opts.cfg file.
  */
 static char *acme = BINDIR "/ib_acme -A";
 static char *opts_file = ACM_CONF_DIR "/" ACM_OPTS_FILE;
 static char *addr_file = ACM_CONF_DIR "/" ACM_ADDR_FILE;
+static char route_data_file[128] = ACM_CONF_DIR "/ibacm_route.data";
+static char addr_data_file[128] = ACM_CONF_DIR "/ibacm_hosts.data";
 static char log_file[128] = "/var/log/ibacm.log";
 static int log_level = 0;
 static char lock_file[128] = "/var/run/ibacm.pid";
@@ -227,6 +242,8 @@ static int send_depth = 1;
 static int recv_depth = 1024;
 static uint8_t min_mtu = IBV_MTU_2048;
 static uint8_t min_rate = IBV_RATE_10_GBPS;
+static enum acm_route_preload route_preload;
+static enum acm_addr_preload addr_preload;
 
 #define acm_log(level, format, ...) \
 	acm_write(level, "%s: "format, __func__, ## __VA_ARGS__)
@@ -2444,6 +2461,26 @@ static enum acm_loopback_prot acm_convert_loopback_prot(char *param)
 	return loopback_prot;
 }
 
+static enum acm_route_preload acm_convert_route_preload(char *param)
+{
+	if (!stricmp("none", param) || !stricmp("no", param))
+		return ACM_ROUTE_PRELOAD_NONE;
+	else if (!stricmp("opensm_full_v1", param))
+		return ACM_ROUTE_PRELOAD_OSM_FULL_V1;
+
+	return route_preload;
+}
+
+static enum acm_route_preload acm_convert_addr_preload(char *param)
+{
+	if (!stricmp("none", param) || !stricmp("no", param))
+		return ACM_ADDR_PRELOAD_NONE;
+	else if (!stricmp("acm_hosts", param))
+		return ACM_ADDR_PRELOAD_HOSTS;
+
+	return addr_preload;
+}
+
 static enum ibv_rate acm_get_rate(uint8_t width, uint8_t speed)
 {
 	switch (width) {
@@ -2553,12 +2590,300 @@ static FILE *acm_open_addr_file(void)
 	return fopen(addr_file, "r");
 }
 
+/* Parse "opensm full v1" file to build LID to GUID table */
+static void acm_parse_osm_fullv1_lid2guid(FILE *f, uint64_t *lid2guid)
+{
+	char s[128];
+	char *p, *ptr, *p_guid, *p_lid;
+	uint64_t guid;
+	uint16_t lid;
+
+	while (fgets(s, sizeof s, f)) {
+		if (s[0] == '#')
+			continue;
+		if (!(p = strtok_r(s, " \n", &ptr)))
+			continue;	/* ignore blank lines */
+
+		if (strncmp(p, "Switch", sizeof("Switch") - 1) &&
+		    strncmp(p, "Channel", sizeof("Channel") - 1) &&
+		    strncmp(p, "Router", sizeof("Router") - 1))
+			continue;
+
+		if (!strncmp(p, "Channel", sizeof("Channel") - 1)) {
+			p = strtok_r(NULL, " ", &ptr); /* skip 'Adapter' */
+			if (!p)
+				continue;
+		}
+
+		p_guid = strtok_r(NULL, ",", &ptr);
+		if (!p_guid)
+			continue;
+
+		guid = (uint64_t) strtoull(p_guid, NULL, 16);
+
+		ptr = strstr(ptr, "base LID");
+		if (!ptr)
+			continue;
+		ptr += sizeof("base LID");
+		p_lid = strtok_r(NULL, ",", &ptr);
+		if (!p_lid)
+			continue;
+
+		lid = (uint16_t) strtoul(p_lid, NULL, 0);
+		if (lid >= IB_LID_MCAST_START)
+			continue;
+		if (lid2guid[lid])
+			acm_log(0, "ERROR - duplicate lid %u\n", lid);
+		else
+			lid2guid[lid] = htonll(guid);
+	}
+}
+
+/* Parse 'opensm full v1' file to populate PR cache */
+static int acm_parse_osm_fullv1_paths(FILE *f, uint64_t *lid2guid, struct acm_ep *ep)
+{
+	union ibv_gid sgid, dgid;
+	struct ibv_port_attr attr = { 0 };
+	struct acm_dest *dest;
+	char s[128];
+	char *p, *ptr, *p_guid, *p_lid;
+	uint64_t guid;
+	uint16_t lid, dlid;
+	int sl, mtu, rate;
+	int ret = 1, i;
+	uint8_t addr[ACM_MAX_ADDRESS];
+	uint8_t addr_type;
+
+	ibv_query_gid(ep->port->dev->verbs, ep->port->port_num, 0, &sgid);
+
+	/* Search for endpoint's SLID */
+	while (fgets(s, sizeof s, f)) {
+		if (s[0] == '#')
+			continue;
+		if (!(p = strtok_r(s, " \n", &ptr)))
+			continue;	/* ignore blank lines */
+
+		if (strncmp(p, "Switch", sizeof("Switch") - 1) &&
+		    strncmp(p, "Channel", sizeof("Channel") - 1) &&
+		    strncmp(p, "Router", sizeof("Router") - 1))
+			continue;
+
+		if (!strncmp(p, "Channel", sizeof("Channel") - 1)) {
+			p = strtok_r(NULL, " ", &ptr); /* skip 'Adapter' */
+			if (!p)
+				continue;
+		}
+
+		p_guid = strtok_r(NULL, ",", &ptr);
+		if (!p_guid)
+			continue;
+
+		guid = (uint64_t) strtoull(p_guid, NULL, 16);
+		if (guid != ntohll(sgid.global.interface_id))
+			continue;
+
+		ptr = strstr(ptr, "base LID");
+		if (!ptr)
+			continue;
+		ptr += sizeof("base LID");
+		p_lid = strtok_r(NULL, ",", &ptr);
+		if (!p_lid)
+			continue;
+
+		lid = (uint16_t) strtoul(p_lid, NULL, 0);
+		if (lid != ep->port->lid)
+			continue;
+
+		ibv_query_port(ep->port->dev->verbs, ep->port->port_num, &attr);
+		ret = 0;
+		break;
+	}
+
+	while (fgets(s, sizeof s, f)) {
+		if (s[0] == '#')
+			continue;
+		if (!(p = strtok_r(s, " \n", &ptr)))
+			continue;	/* ignore blank lines */
+
+		if (!strncmp(p, "Switch", sizeof("Switch") - 1) ||
+		    !strncmp(p, "Channel", sizeof("Channel") - 1) ||
+		    !strncmp(p, "Router", sizeof("Router") - 1))
+			break;
+
+		dlid = strtoul(p, NULL, 0);
+
+		p = strtok_r(NULL, ":", &ptr);
+		if (!p)
+			continue;
+		if (strcmp(p, "UNREACHABLE") == 0)
+			continue;
+		sl = atoi(p);
+
+		p = strtok_r(NULL, ":", &ptr);
+		if (!p)
+			continue;
+		mtu = atoi(p);
+
+		p = strtok_r(NULL, ":", &ptr);
+		if (!p)
+			continue;
+		rate = atoi(p);
+
+		if (!lid2guid[dlid]) {
+			acm_log(0, "ERROR - dlid %u not found in lid2guid table\n", dlid);
+			continue;
+		}
+
+		dgid.global.subnet_prefix = sgid.global.subnet_prefix;
+		dgid.global.interface_id = lid2guid[dlid];
+
+		for (i = 0; i < 2; i++) {
+			memset(addr, 0, ACM_MAX_ADDRESS);
+			if (i == 0) {
+				addr_type = ACM_ADDRESS_LID;
+				*((uint16_t *) addr) = htons(dlid);
+			} else {
+				addr_type = ACM_ADDRESS_GID;
+				memcpy(addr, &dgid, sizeof(dgid));
+			}
+			dest = acm_acquire_dest(ep, addr_type, addr);
+			if (!dest) {
+				acm_log(0, "ERROR - unable to create dest\n");
+				break;
+			}
+
+			dest->path.sgid = sgid;
+			dest->path.slid = htons(ep->port->lid);
+			dest->path.dgid = dgid;
+			dest->path.dlid = htons(dlid);
+			dest->path.reversible_numpath = IBV_PATH_RECORD_REVERSIBLE;
+			dest->path.pkey = htons(ep->pkey);
+			dest->path.mtu = (uint8_t) mtu;
+			dest->path.rate = (uint8_t) rate;
+			dest->path.qosclass_sl = htons((uint16_t) sl & 0xF);
+			if (dlid == ep->port->lid) {
+				dest->path.packetlifetime = 0;
+				dest->addr_timeout = (uint64_t)~0ULL;
+				dest->route_timeout = (uint64_t)~0ULL;
+			} else {
+				dest->path.packetlifetime = attr.subnet_timeout;
+				dest->addr_timeout = time_stamp_min() + (unsigned) addr_timeout;
+				dest->route_timeout = time_stamp_min() + (unsigned) route_timeout;
+			}
+			dest->remote_qpn = 1;
+			dest->state = ACM_READY;
+			acm_put_dest(dest);
+			acm_log(1, "added cached dest %s\n", dest->name);
+		}
+	}
+	return ret;
+}
+
+static int acm_parse_osm_fullv1(struct acm_ep *ep)
+{
+	FILE *f;
+	uint64_t *lid2guid;
+	int ret = 1;
+
+	if (!(f = fopen(route_data_file, "r"))) {
+		acm_log(0, "ERROR - couldn't open %s\n", route_data_file);
+		return ret;
+	}
+
+	lid2guid = calloc(IB_LID_MCAST_START, sizeof(*lid2guid));
+	if (!lid2guid) {
+		acm_log(0, "ERROR - no memory for path record parsing\n");
+		goto err;
+	}
+
+	acm_parse_osm_fullv1_lid2guid(f, lid2guid);
+	rewind(f);
+	ret = acm_parse_osm_fullv1_paths(f, lid2guid, ep);
+	free(lid2guid);
+err:
+	fclose(f);
+	return ret;
+}
+
+static void acm_parse_hosts_file(struct acm_ep *ep)
+{
+	FILE *f;
+	char s[120];
+	char addr[INET6_ADDRSTRLEN], gid[INET6_ADDRSTRLEN];
+	uint8_t name[ACM_MAX_ADDRESS];
+	struct in6_addr ip_addr, ib_addr;
+	struct acm_dest *dest, *gid_dest;
+	uint8_t addr_type;
+
+	if (!(f = fopen(addr_data_file, "r"))) {
+		acm_log(0, "ERROR - couldn't open %s\n", addr_data_file);
+		return;
+        }
+
+	while (fgets(s, sizeof s, f)) {
+		if (s[0] == '#')
+			continue;
+
+		if (sscanf(s, "%46s%46s", addr, gid) != 2)
+			continue;
+
+		acm_log(2, "%s", s);
+		if (inet_pton(AF_INET6, gid, &ib_addr) <= 0) {
+			acm_log(0, "ERROR - %s is not IB GID\n", gid);
+			continue;
+		}
+		memset(name, 0, ACM_MAX_ADDRESS);
+		if (inet_pton(AF_INET, addr, &ip_addr) > 0) {
+			addr_type = ACM_ADDRESS_IP;
+			memcpy(name, &ip_addr, 4);
+		} else if (inet_pton(AF_INET6, addr, &ip_addr) > 0) {
+			addr_type = ACM_ADDRESS_IP6;
+			memcpy(name, &ip_addr, sizeof(ip_addr));
+		} else {
+			addr_type = ACM_ADDRESS_NAME;
+			strncpy((char *)name, addr, ACM_MAX_ADDRESS);
+		}
+
+		dest = acm_acquire_dest(ep, addr_type, name);
+		if (!dest) {
+			acm_log(0, "ERROR - unable to create dest %s\n", addr);
+			continue;
+		}
+
+		memset(name, 0, ACM_MAX_ADDRESS);
+		memcpy(name, &ib_addr, sizeof(ib_addr));
+		gid_dest = acm_get_dest(ep, ACM_ADDRESS_GID, name);
+		if (gid_dest) {
+			dest->path = gid_dest->path;
+			dest->state = ACM_READY;
+			acm_put_dest(gid_dest);
+		} else {
+			memcpy(&dest->path.dgid, &ib_addr, 16);
+			//ibv_query_gid(ep->port->dev->verbs, ep->port->port_num,
+			//		0, &dest->path.sgid);
+			dest->path.slid = htons(ep->port->lid);
+			dest->path.reversible_numpath = IBV_PATH_RECORD_REVERSIBLE;
+			dest->path.pkey = htons(ep->pkey);
+			dest->state = ACM_ADDR_RESOLVED;
+		}
+
+		dest->remote_qpn = 1;
+		dest->addr_timeout = time_stamp_min() + (unsigned) addr_timeout;
+		dest->route_timeout = time_stamp_min() + (unsigned) route_timeout;
+		acm_put_dest(dest);
+		acm_log(1, "added host %s address type %d IB GID %s\n",
+			addr, addr_type, gid);
+	}
+
+	fclose(f);
+}
+
 static int acm_assign_ep_names(struct acm_ep *ep)
 {
 	FILE *faddr;
 	char *dev_name;
 	char s[120];
-	char dev[32], addr[32], pkey_str[8];
+	char dev[32], addr[INET6_ADDRSTRLEN], pkey_str[8];
 	uint16_t pkey;
 	uint8_t type;
 	int port, index = 0;
@@ -2577,7 +2902,7 @@ static int acm_assign_ep_names(struct acm_ep *ep)
 		if (s[0] == '#')
 			continue;
 
-		if (sscanf(s, "%32s%32s%d%8s", addr, dev, &port, pkey_str) != 4)
+		if (sscanf(s, "%46s%32s%d%8s", addr, dev, &port, pkey_str) != 4)
 			continue;
 
 		acm_log(2, "%s", s);
@@ -2619,6 +2944,31 @@ static int acm_assign_ep_names(struct acm_ep *ep)
 	fclose(faddr);
 
 	return !index;
+}
+
+/*
+ * We currently require that the routing data be preloaded in order to
+ * load the address data.  This is backwards from normal operation, which
+ * usually resolves the address before the route.
+ */
+static void acm_ep_preload(struct acm_ep *ep)
+{
+	switch (route_preload) {
+	case ACM_ROUTE_PRELOAD_OSM_FULL_V1:
+		if (acm_parse_osm_fullv1(ep))
+			acm_log(0, "ERROR - failed to preload EP\n");
+		break;
+	default:
+		break;
+	}
+
+	switch (addr_preload) {
+	case ACM_ADDR_PRELOAD_HOSTS:
+		acm_parse_hosts_file(ep);
+		break;
+	default:
+		break;
+	}
 }
 
 static int acm_init_ep_loopback(struct acm_ep *ep)
@@ -2802,6 +3152,7 @@ static void acm_ep_up(struct acm_port *port, uint16_t pkey_index)
 	lock_acquire(&port->lock);
 	DListInsertHead(&ep->entry, &port->ep_list);
 	lock_release(&port->lock);
+	acm_ep_preload(ep);
 	return;
 
 err2:
@@ -3068,7 +3419,7 @@ static void acm_set_options(void)
 {
 	FILE *f;
 	char s[120];
-	char opt[32], value[32];
+	char opt[32], value[256];
 
 	if (!(f = fopen(opts_file, "r")))
 		return;
@@ -3077,7 +3428,7 @@ static void acm_set_options(void)
 		if (s[0] == '#')
 			continue;
 
-		if (sscanf(s, "%32s%32s", opt, value) != 2)
+		if (sscanf(s, "%32s%256s", opt, value) != 2)
 			continue;
 
 		if (!stricmp("log_file", opt))
@@ -3114,6 +3465,14 @@ static void acm_set_options(void)
 			min_mtu = acm_convert_mtu(atoi(value));
 		else if (!stricmp("min_rate", opt))
 			min_rate = acm_convert_rate(atoi(value));
+		else if (!stricmp("route_preload", opt))
+			route_preload = acm_convert_route_preload(value);
+		else if (!stricmp("route_data_file", opt))
+			strcpy(route_data_file, value);
+		else if (!stricmp("addr_preload", opt))
+			addr_preload = acm_convert_addr_preload(value);
+		else if (!stricmp("addr_data_file", opt))
+			strcpy(addr_data_file, value);
 	}
 
 	fclose(f);
@@ -3137,6 +3496,10 @@ static void acm_log_options(void)
 	acm_log(0, "receive depth %d\n", recv_depth);
 	acm_log(0, "minimum mtu %d\n", min_mtu);
 	acm_log(0, "minimum rate %d\n", min_rate);
+	acm_log(0, "route preload %d\n", route_preload);
+	acm_log(0, "route data file %s\n", route_data_file);
+	acm_log(0, "address preload %d\n", addr_preload);
+	acm_log(0, "address data file %s\n", addr_data_file);
 }
 
 static FILE *acm_open_log(void)
@@ -3200,9 +3563,9 @@ static void show_usage(char *program)
 	printf("   [-D]             - run as a daemon (default)\n");
 	printf("   [-P]             - run as a standard process\n");
 	printf("   [-A addr_file]   - address configuration file\n");
-	printf("                      (default %s/%s\n", ACM_CONF_DIR, ACM_ADDR_FILE);
+	printf("                      (default %s/%s)\n", ACM_CONF_DIR, ACM_ADDR_FILE);
 	printf("   [-O option_file] - option configuration file\n");
-	printf("                      (default %s/%s\n", ACM_CONF_DIR, ACM_OPTS_FILE);
+	printf("                      (default %s/%s)\n", ACM_CONF_DIR, ACM_OPTS_FILE);
 }
 
 int CDECL_FUNC main(int argc, char **argv)

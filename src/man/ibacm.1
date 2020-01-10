@@ -1,10 +1,10 @@
-.TH "ibacm" 1 "2012-03-01" "ibacm" "ibacm" ibacm
+.TH "ibacm" 1 "2013-07-18" "ibacm" "ibacm" ibacm
 .SH NAME
 ibacm \- address and route resolution services for InfiniBand.
 .SH SYNOPSIS
 .sp
 .nf
-\fIibacm\fR
+\fIibacm\fR [-D] [-P] [-A addr_file] [-O option_file]
 .fi
 .SH "DESCRIPTION"
 The IB ACM implements and provides a framework for name,
@@ -33,6 +33,19 @@ different fabric topologies.
 The IB ACM package is comprised of two components: the ibacm service
 and a test/configuration utility - ib_acme.  Both are userspace components
 and are available for Linux and Windows.  Additional details are given below.
+.SH "OPTIONS"
+.TP
+\-D
+run in daemon mode (default)
+.TP
+\-P
+run as standard process
+.TP
+\-A addr_file
+address configuration file
+.TP
+\-O option_file
+option configuration file
 .SH "QUICK START GUIDE"
 1. Prerequisites: libibverbs and libibumad must be installed.
 The IB stack should be running with IPoIB configured.
@@ -46,6 +59,7 @@ These steps assume that the user has administrative privileges.
 the ibacm service is running.
 .P
 5. Install librdmacm, using the build option --with-ib_acm if needed.
+This build option is not needed with librdmacm 1.0.17 or newer.
 The librdmacm will automatically use the ibacm service.
 On failures, the librdmacm will fall back to normal resolution.
 .P
@@ -131,5 +145,21 @@ request is received from a different QPN than a cached request.
 limited to 4.
 .P
 - The number of multicast groups that an endpoint can support is limited to 2.
+.P
+The ibacm contains several internal caches.  These include caches for GID
+and LID destination addresses.  These caches can be optionally
+preloaded. ibacm supports the OpenSM dump_pr plugin "full" PathRecord
+format which is used to preload these caches.
+The file format is specified in the ibacm_opts.cfg file via the
+route_preload setting which should be set to full_opensm_v1 for this
+file format.  Default format is none which does not preload these caches.
+See dump_pr.notes.txt in dump_pr for more information on the
+full_opensm_v1 file format and how to configure OpenSM to
+generate this file.
+.P
+Additionally, the name, IPv4, and IPv6 caches can be be preloaded by using
+the addr_preload option.  The default is none which does not preload these
+caches. To preload these caches, set this option to acm_hosts and
+configure the addr_data_file appropriately.
 .SH "SEE ALSO"
-ibacm(7) ib_acme(1), rdma_cm(7)
+ibacm(7), ib_acme(1), rdma_cm(7)

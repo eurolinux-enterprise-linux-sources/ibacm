@@ -1,0 +1,112 @@
+diff -up ibacm-1.0.8/src/acm.c.coverity ibacm-1.0.8/src/acm.c
+--- ibacm-1.0.8/src/acm.c.coverity	2013-07-26 00:27:59.000000000 -0400
++++ ibacm-1.0.8/src/acm.c	2013-11-26 16:29:23.361089083 -0500
+@@ -223,11 +223,11 @@ static atomic_t counter[ACM_MAX_COUNTER]
+ static char *acme = BINDIR "/ib_acme -A";
+ static char *opts_file = ACM_CONF_DIR "/" ACM_OPTS_FILE;
+ static char *addr_file = ACM_CONF_DIR "/" ACM_ADDR_FILE;
+-static char route_data_file[128] = ACM_CONF_DIR "/ibacm_route.data";
+-static char addr_data_file[128] = ACM_CONF_DIR "/ibacm_hosts.data";
+-static char log_file[128] = "/var/log/ibacm.log";
++static char route_data_file[256] = ACM_CONF_DIR "/ibacm_route.data";
++static char addr_data_file[256] = ACM_CONF_DIR "/ibacm_hosts.data";
++static char log_file[256] = "/var/log/ibacm.log";
+ static int log_level = 0;
+-static char lock_file[128] = "/var/run/ibacm.pid";
++static char lock_file[256] = "/var/run/ibacm.pid";
+ static enum acm_addr_prot addr_prot = ACM_ADDR_PROT_ACM;
+ static int addr_timeout = 1440;
+ static enum acm_route_prot route_prot = ACM_ROUTE_PROT_SA;
+@@ -2694,8 +2694,9 @@ static int acm_parse_osm_fullv1_paths(FI
+ 		if (lid != ep->port->lid)
+ 			continue;
+ 
+-		ibv_query_port(ep->port->dev->verbs, ep->port->port_num, &attr);
+-		ret = 0;
++		ret = ibv_query_port(ep->port->dev->verbs, ep->port->port_num, &attr);
++		if (ret < 0)
++			return ret;
+ 		break;
+ 	}
+ 
+@@ -3520,20 +3521,25 @@ static FILE *acm_open_log(void)
+ 
+ static int acm_open_lock_file(void)
+ {
+-	int lock_fd;
++	int lock_fd, ret = 0;
+ 	char pid[16];
+ 
+ 	lock_fd = open(lock_file, O_RDWR | O_CREAT, 0640);
+ 	if (lock_fd < 0)
+ 		return lock_fd;
+ 
+-	if (lockf(lock_fd, F_TLOCK, 0)) {
++	ret = lockf(lock_fd, F_TLOCK, 0);
++	if (ret) {
+ 		close(lock_fd);
+-		return -1;
++		return ret;
+ 	}
+ 
+ 	snprintf(pid, sizeof pid, "%d\n", getpid());
+-	write(lock_fd, pid, strlen(pid));
++	ret = write(lock_fd, pid, strlen(pid));
++	if (ret <= 0) {
++		close(lock_fd);
++		return -1;
++	}
+ 	return 0;
+ }
+ 
+@@ -3552,9 +3558,12 @@ static void daemonize(void)
+ 	if (chdir("/"))
+ 		exit(1);
+ 
+-	freopen("/dev/null", "r", stdin);
+-	freopen("/dev/null", "w", stdout);
+-	freopen("/dev/null", "w", stderr);
++	if (freopen("/dev/null", "r", stdin) == NULL)
++		exit(1);
++	if (freopen("/dev/null", "w", stdout) == NULL)
++		exit(1);
++	if (freopen("/dev/null", "w", stderr) == NULL)
++		exit(1);
+ }
+ 
+ static void show_usage(char *program)
+diff -up ibacm-1.0.8/src/acme.c.coverity ibacm-1.0.8/src/acme.c
+--- ibacm-1.0.8/src/acme.c.coverity	2013-11-26 16:30:30.826526644 -0500
++++ ibacm-1.0.8/src/acme.c	2013-11-26 16:52:27.655400484 -0500
+@@ -776,7 +776,7 @@ static int query_svcs(void)
+ 	for (i = 0; svc_list[i]; i++) {
+ 		ret = ib_acm_connect(svc_list[i]);
+ 		if (ret) {
+-			printf("%s,unable to contact service: %s\n",
++			printf("%s, unable to contact service: %s\n",
+ 				svc_list[i], strerror(errno));
+ 			continue;
+ 		}
+@@ -791,7 +791,7 @@ static int query_svcs(void)
+ 	}
+ 
+ 	free(svc_list);
+-	return ret;
++	return 0;
+ }
+ 
+ char *opt_arg(int argc, char **argv)
+diff -up ibacm-1.0.8/src/libacm.c.coverity ibacm-1.0.8/src/libacm.c
+--- ibacm-1.0.8/src/libacm.c.coverity	2013-11-26 16:52:57.380140969 -0500
++++ ibacm-1.0.8/src/libacm.c	2013-11-26 16:58:16.904437443 -0500
+@@ -64,7 +64,9 @@ static void acm_set_server_port(void)
+ 	FILE *f;
+ 
+ 	if ((f = fopen("/var/run/ibacm.port", "r"))) {
+-		fscanf(f, "%hu", (unsigned short *) &server_port);
++		if (fscanf(f, "%hu", (unsigned short *) &server_port) != 1)
++			fprintf(stderr, "libacm: failed to read port from "
++				"/var/run/ibacm.port\n");
+ 		fclose(f);
+ 	}
+ }

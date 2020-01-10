@@ -1,17 +1,19 @@
 Name: ibacm
 Version: 1.0.8
-Release: 0.git7a3adb7.1%{?dist}
+Release: 4%{?dist}
 Summary: InfiniBand Communication Manager Assistant
 Group: System Environment/Daemons
 License: GPLv2 or BSD
 Url: http://www.openfabrics.org/
-Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}-0.git7a3adb7.tar.gz
+Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}.tar.gz
 Source1: ibacm.service
-Patch0: ibacm-0001-Increase-size-of-available-file-name.patch
+Patch0: ibacm-1.0.8-coverity-fixes.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires: libibverbs-devel >= 1.1-1, autoconf, libtool, libibumad-devel
-Requires(post): chkconfig
-Requires(preun): chkconfig
+BuildRequires: systemd-units
+Requires(post): systemd-units
+Requires(preun): systemd-units
+Requires(postun): systemd-units
 ExcludeArch: s390 s390x
 
 %description
@@ -42,12 +44,13 @@ wish to make use of this header file.
 
 %prep
 %setup -q -n %{name}-%{version}
-%patch0 -p1
+%patch0 -p1 -b .coverity
 
 %build
-./autogen.sh
+# ./autogen.sh
 %configure CFLAGS="$CXXFLAGS -fno-strict-aliasing" LIBS=-lpthread
 make %{?_smp_mflags}
+util/ib_acme -D . -O
 
 %install
 make DESTDIR=%{buildroot} install
@@ -79,6 +82,21 @@ install -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/ibacm.service
 %{_includedir}/infiniband/acm.h
 
 %changelog
+* Wed Jan 22 2014 Doug Ledford <dledford@redhat.com> - 1.0.8-4
+- Fix Requires for scriptlets
+- Resolves: bz1056590
+
+* Fri Dec 27 2013 Daniel Mach <dmach@redhat.com> - 1.0.8-3
+- Mass rebuild 2013-12-27
+
+* Tue Nov 26 2013 Doug Ledford <dledford@redhat.com> - 1.0.8-2
+- Fixes for coverity scan defects found
+- Related: bz839190
+
+* Tue Nov 26 2013 Doug Ledford <dledford@redhat.com> - 1.0.8-1
+- Update to official 1.0.8 release
+- Related: bz839190
+
 * Tue Mar 26 2013 Doug Ledford <dledford@redhat.com> - 1.0.8-0.git7a3adb7.1
 - Add one additional patch from upstream
 - Convert to systemd unit file
