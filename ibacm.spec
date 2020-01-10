@@ -1,26 +1,30 @@
 %global _hardened_build 1
 
+Name: ibacm
+Version: 1.2.0
+Release: 1%{?dist}
+Summary: InfiniBand Communication Manager Assistant
+Group: System Environment/Daemons
+License: GPLv2 or BSD
+Url: https://github.com/ofiwg/ibacm
+Source: https://github.com/ofiwg/${name}/archive/v%{version}.tar.gz
+Source1: ibacm.service
+Patch0001: 0001-Coverity-and-compile-warning-fixes.patch
+BuildRequires: libibverbs-devel >= 1.2.0
+BuildRequires: libibumad-devel
+BuildRequires: systemd-units
+BuildRequires: autoconf
+BuildRequires: automake
+BuildRequires: libtool
+Requires(post): systemd-units
+Requires(preun): systemd-units
+Requires(postun): systemd-units
+
 # libibacmp.so is a plugin for the ibacm daemon, not a public library.
 # Do not advertise it in RPM metadata:
 %global _privatelibs libibacmp[.]so.*
 %global __provides_exclude ^(%{_privatelibs})$
 %global __requires_exclude ^(%{_privatelibs})$
-
-Name: ibacm
-Version: 1.1.0
-Release: 1%{?dist}
-Summary: InfiniBand Communication Manager Assistant
-Group: System Environment/Daemons
-License: GPLv2 or BSD
-Url: http://www.openfabrics.org/
-Source: http://downloads.openfabrics.org/downloads/rdmacm/%{name}-%{version}.tar.gz
-Source1: ibacm.service
-Patch0001: 0001-Coverity-and-compile-warning-fixes.patch
-BuildRequires: libibverbs-devel libibumad-devel
-BuildRequires: systemd-units
-Requires(post): systemd-units
-Requires(preun): systemd-units
-Requires(postun): systemd-units
 
 %description
 The ibacm daemon helps reduce the load of managing path record lookups on
@@ -34,7 +38,7 @@ library knows how to talk directly to the ibacm daemon to retrieve data.
 
 %package devel
 Summary: Headers file needed when building apps to talk directly to ibacm
-Requires: %{name} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %{version}-%{release}
 
 %description devel
 Most applications do not need to know how to talk directly to the ibacm
@@ -53,8 +57,8 @@ wish to make use of this header file.
 %patch0001 -p1
 
 %build
-# ./autogen.sh
-%configure CFLAGS="$CXXFLAGS -fno-strict-aliasing" LIBS=-lpthread
+./autogen.sh
+%configure CFLAGS="$RPM_OPT_FLAGS -fno-strict-aliasing"
 make %{?_smp_mflags}
 util/ib_acme -D . -O
 # Fixup a multilib conflict in ibacm_opts.cfg:
@@ -79,9 +83,11 @@ install -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/ibacm.service
 %systemd_postun_with_restart ibacm.service
 
 %files
-%doc AUTHORS COPYING README
+%doc AUTHORS README
+%license COPYING
 %{_bindir}/ib_acme
 %{_sbindir}/ibacm
+%{_sysconfdir}/rdma
 %config(noreplace)%{_sysconfdir}/rdma/ibacm_opts.cfg
 %{_mandir}/man1/*
 %{_mandir}/man7/*
@@ -93,6 +99,10 @@ install -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/ibacm.service
 %{_includedir}/infiniband/acm_prov.h
 
 %changelog
+* Thu Apr 21 2016 Honggang Li <honli@redhat.com> - 1.2.0-1
+- Update to latest upstream release version 1.2.0.
+- Related: bz1273143
+
 * Tue Aug 04 2015 Michal Schmidt <mschmidt@redhat.com> - 1.1.0-1
 - Update to upstream release 1.1.0.
 - Resolves: bz1249809
