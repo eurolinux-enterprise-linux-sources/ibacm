@@ -1,6 +1,8 @@
+%define _hardened_build 1
+
 Name: ibacm
-Version: 1.0.8
-Release: 4%{?dist}
+Version: 1.0.9
+Release: 1%{?dist}
 Summary: InfiniBand Communication Manager Assistant
 Group: System Environment/Daemons
 License: GPLv2 or BSD
@@ -9,7 +11,7 @@ Source: http://www.openfabrics.org/downloads/rdmacm/%{name}-%{version}.tar.gz
 Source1: ibacm.service
 Patch0: ibacm-1.0.8-coverity-fixes.patch
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires: libibverbs-devel >= 1.1-1, autoconf, libtool, libibumad-devel
+BuildRequires: libibverbs-devel libibumad-devel
 BuildRequires: systemd-units
 Requires(post): systemd-units
 Requires(preun): systemd-units
@@ -82,6 +84,11 @@ install -D -m 644 %{SOURCE1} %{buildroot}%{_unitdir}/ibacm.service
 %{_includedir}/infiniband/acm.h
 
 %changelog
+* Thu Oct 09 2014 Doug Ledford <dledford@redhat.com> - 1.0.9-1
+- Update to latest upstream release
+- Make sure build is hardened
+- Resolves: bz1092538
+
 * Wed Jan 22 2014 Doug Ledford <dledford@redhat.com> - 1.0.8-4
 - Fix Requires for scriptlets
 - Resolves: bz1056590

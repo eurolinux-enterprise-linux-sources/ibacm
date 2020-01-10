@@ -60,7 +60,8 @@ am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(sbindir)" \
 	"$(DESTDIR)$(ibacmincludedir)"
 PROGRAMS = $(bin_PROGRAMS) $(sbin_PROGRAMS)
 am__dirstamp = $(am__leading_dot)dirstamp
-am_svc_ibacm_OBJECTS = src/svc_ibacm-acm.$(OBJEXT)
+am_svc_ibacm_OBJECTS = src/svc_ibacm-acm.$(OBJEXT) \
+	src/svc_ibacm-acm_util.$(OBJEXT)
 svc_ibacm_OBJECTS = $(am_svc_ibacm_OBJECTS)
 svc_ibacm_LDADD = $(LDADD)
 AM_V_lt = $(am__v_lt_$(V))
@@ -70,7 +71,6 @@ svc_ibacm_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(svc_ibacm_CFLAGS) \
 	$(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
 am_util_ib_acme_OBJECTS = src/util_ib_acme-acme.$(OBJEXT) \
-	linux/util_ib_acme-acme_linux.$(OBJEXT) \
 	src/util_ib_acme-libacm.$(OBJEXT) \
 	linux/util_ib_acme-libacm_linux.$(OBJEXT) \
 	src/util_ib_acme-parse.$(OBJEXT)
@@ -260,12 +260,12 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-AM_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/linux
+AM_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/linux -I$(srcdir)/src
 AM_CFLAGS = -g -Wall -D_GNU_SOURCE -DSYSCONFDIR=\"$(sysconfdir)\" -DBINDIR=\"$(bindir)\" -DRDMADIR=\"@rdmadir@\"
-svc_ibacm_SOURCES = src/acm.c
-util_ib_acme_SOURCES = src/acme.c linux/acme_linux.c src/libacm.c linux/libacm_linux.c src/parse.c
+svc_ibacm_SOURCES = src/acm.c src/acm_util.c
+util_ib_acme_SOURCES = src/acme.c src/libacm.c linux/libacm_linux.c src/parse.c
 svc_ibacm_CFLAGS = $(AM_CFLAGS)
-util_ib_acme_CFLAGS = $(AM_CFLAGS)
+util_ib_acme_CFLAGS = $(AM_CFLAGS) -DACME_PRINTS
 ibacmincludedir = $(includedir)/infiniband
 ibacminclude_HEADERS = include/infiniband/acm.h
 man_MANS = \
@@ -273,7 +273,7 @@ man_MANS = \
 	man/ibacm.1 \
 	man/ibacm.7
 
-EXTRA_DIST = src/acm_mad.h src/libacm.h ibacm.init.in \
+EXTRA_DIST = src/acm_util.h src/acm_mad.h src/libacm.h ibacm.init.in \
 	     linux/osd.h linux/dlist.h ibacm.spec.in $(man_MANS) ibacm_hosts.data
 
 all: config.h
@@ -430,6 +430,8 @@ src/$(DEPDIR)/$(am__dirstamp):
 	@: > src/$(DEPDIR)/$(am__dirstamp)
 src/svc_ibacm-acm.$(OBJEXT): src/$(am__dirstamp) \
 	src/$(DEPDIR)/$(am__dirstamp)
+src/svc_ibacm-acm_util.$(OBJEXT): src/$(am__dirstamp) \
+	src/$(DEPDIR)/$(am__dirstamp)
 svc/$(am__dirstamp):
 	@$(MKDIR_P) svc
 	@: > svc/$(am__dirstamp)
@@ -438,16 +440,14 @@ svc/ibacm$(EXEEXT): $(svc_ibacm_OBJECTS) $(svc_ibacm_DEPENDENCIES) svc/$(am__dir
 	$(AM_V_CCLD)$(svc_ibacm_LINK) $(svc_ibacm_OBJECTS) $(svc_ibacm_LDADD) $(LIBS)
 src/util_ib_acme-acme.$(OBJEXT): src/$(am__dirstamp) \
 	src/$(DEPDIR)/$(am__dirstamp)
+src/util_ib_acme-libacm.$(OBJEXT): src/$(am__dirstamp) \
+	src/$(DEPDIR)/$(am__dirstamp)
 linux/$(am__dirstamp):
 	@$(MKDIR_P) linux
 	@: > linux/$(am__dirstamp)
 linux/$(DEPDIR)/$(am__dirstamp):
 	@$(MKDIR_P) linux/$(DEPDIR)
 	@: > linux/$(DEPDIR)/$(am__dirstamp)
-linux/util_ib_acme-acme_linux.$(OBJEXT): linux/$(am__dirstamp) \
-	linux/$(DEPDIR)/$(am__dirstamp)
-src/util_ib_acme-libacm.$(OBJEXT): src/$(am__dirstamp) \
-	src/$(DEPDIR)/$(am__dirstamp)
 linux/util_ib_acme-libacm_linux.$(OBJEXT): linux/$(am__dirstamp) \
 	linux/$(DEPDIR)/$(am__dirstamp)
 src/util_ib_acme-parse.$(OBJEXT): src/$(am__dirstamp) \
@@ -461,9 +461,9 @@ util/ib_acme$(EXEEXT): $(util_ib_acme_OBJECTS) $(util_ib_acme_DEPENDENCIES) util
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
-	-rm -f linux/util_ib_acme-acme_linux.$(OBJEXT)
 	-rm -f linux/util_ib_acme-libacm_linux.$(OBJEXT)
 	-rm -f src/svc_ibacm-acm.$(OBJEXT)
+	-rm -f src/svc_ibacm-acm_util.$(OBJEXT)
 	-rm -f src/util_ib_acme-acme.$(OBJEXT)
 	-rm -f src/util_ib_acme-libacm.$(OBJEXT)
 	-rm -f src/util_ib_acme-parse.$(OBJEXT)
@@ -471,9 +471,9 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@linux/$(DEPDIR)/util_ib_acme-acme_linux.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@linux/$(DEPDIR)/util_ib_acme-libacm_linux.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/svc_ibacm-acm.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/svc_ibacm-acm_util.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/util_ib_acme-acme.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/util_ib_acme-libacm.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/util_ib_acme-parse.Po@am__quote@
@@ -521,6 +521,22 @@ src/svc_ibacm-acm.obj: src/acm.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -c -o src/svc_ibacm-acm.obj `if test -f 'src/acm.c'; then $(CYGPATH_W) 'src/acm.c'; else $(CYGPATH_W) '$(srcdir)/src/acm.c'; fi`
 
+src/svc_ibacm-acm_util.o: src/acm_util.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -MT src/svc_ibacm-acm_util.o -MD -MP -MF src/$(DEPDIR)/svc_ibacm-acm_util.Tpo -c -o src/svc_ibacm-acm_util.o `test -f 'src/acm_util.c' || echo '$(srcdir)/'`src/acm_util.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) src/$(DEPDIR)/svc_ibacm-acm_util.Tpo src/$(DEPDIR)/svc_ibacm-acm_util.Po
+@am__fastdepCC_FALSE@	$(AM_V_CC) @AM_BACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='src/acm_util.c' object='src/svc_ibacm-acm_util.o' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -c -o src/svc_ibacm-acm_util.o `test -f 'src/acm_util.c' || echo '$(srcdir)/'`src/acm_util.c
+
+src/svc_ibacm-acm_util.obj: src/acm_util.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -MT src/svc_ibacm-acm_util.obj -MD -MP -MF src/$(DEPDIR)/svc_ibacm-acm_util.Tpo -c -o src/svc_ibacm-acm_util.obj `if test -f 'src/acm_util.c'; then $(CYGPATH_W) 'src/acm_util.c'; else $(CYGPATH_W) '$(srcdir)/src/acm_util.c'; fi`
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) src/$(DEPDIR)/svc_ibacm-acm_util.Tpo src/$(DEPDIR)/svc_ibacm-acm_util.Po
+@am__fastdepCC_FALSE@	$(AM_V_CC) @AM_BACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='src/acm_util.c' object='src/svc_ibacm-acm_util.obj' libtool=no @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -c -o src/svc_ibacm-acm_util.obj `if test -f 'src/acm_util.c'; then $(CYGPATH_W) 'src/acm_util.c'; else $(CYGPATH_W) '$(srcdir)/src/acm_util.c'; fi`
+
 src/util_ib_acme-acme.o: src/acme.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -MT src/util_ib_acme-acme.o -MD -MP -MF src/$(DEPDIR)/util_ib_acme-acme.Tpo -c -o src/util_ib_acme-acme.o `test -f 'src/acme.c' || echo '$(srcdir)/'`src/acme.c
 @am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) src/$(DEPDIR)/util_ib_acme-acme.Tpo src/$(DEPDIR)/util_ib_acme-acme.Po
@@ -536,22 +552,6 @@ src/util_ib_acme-acme.obj: src/acme.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	source='src/acme.c' object='src/util_ib_acme-acme.obj' libtool=no @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -c -o src/util_ib_acme-acme.obj `if test -f 'src/acme.c'; then $(CYGPATH_W) 'src/acme.c'; else $(CYGPATH_W) '$(srcdir)/src/acme.c'; fi`
-
-linux/util_ib_acme-acme_linux.o: linux/acme_linux.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -MT linux/util_ib_acme-acme_linux.o -MD -MP -MF linux/$(DEPDIR)/util_ib_acme-acme_linux.Tpo -c -o linux/util_ib_acme-acme_linux.o `test -f 'linux/acme_linux.c' || echo '$(srcdir)/'`linux/acme_linux.c
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) linux/$(DEPDIR)/util_ib_acme-acme_linux.Tpo linux/$(DEPDIR)/util_ib_acme-acme_linux.Po
-@am__fastdepCC_FALSE@	$(AM_V_CC) @AM_BACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='linux/acme_linux.c' object='linux/util_ib_acme-acme_linux.o' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -c -o linux/util_ib_acme-acme_linux.o `test -f 'linux/acme_linux.c' || echo '$(srcdir)/'`linux/acme_linux.c
-
-linux/util_ib_acme-acme_linux.obj: linux/acme_linux.c
-@am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -MT linux/util_ib_acme-acme_linux.obj -MD -MP -MF linux/$(DEPDIR)/util_ib_acme-acme_linux.Tpo -c -o linux/util_ib_acme-acme_linux.obj `if test -f 'linux/acme_linux.c'; then $(CYGPATH_W) 'linux/acme_linux.c'; else $(CYGPATH_W) '$(srcdir)/linux/acme_linux.c'; fi`
-@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) linux/$(DEPDIR)/util_ib_acme-acme_linux.Tpo linux/$(DEPDIR)/util_ib_acme-acme_linux.Po
-@am__fastdepCC_FALSE@	$(AM_V_CC) @AM_BACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='linux/acme_linux.c' object='linux/util_ib_acme-acme_linux.obj' libtool=no @AMDEPBACKSLASH@
-@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
-@am__fastdepCC_FALSE@	$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -c -o linux/util_ib_acme-acme_linux.obj `if test -f 'linux/acme_linux.c'; then $(CYGPATH_W) 'linux/acme_linux.c'; else $(CYGPATH_W) '$(srcdir)/linux/acme_linux.c'; fi`
 
 src/util_ib_acme-libacm.o: src/libacm.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(util_ib_acme_CFLAGS) $(CFLAGS) -MT src/util_ib_acme-libacm.o -MD -MP -MF src/$(DEPDIR)/util_ib_acme-libacm.Tpo -c -o src/util_ib_acme-libacm.o `test -f 'src/libacm.c' || echo '$(srcdir)/'`src/libacm.c
