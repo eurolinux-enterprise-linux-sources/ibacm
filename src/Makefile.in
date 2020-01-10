@@ -16,6 +16,7 @@
 @SET_MAKE@
 
 
+
 VPATH = @srcdir@
 pkgdatadir = $(datadir)/@PACKAGE@
 pkgincludedir = $(includedir)/@PACKAGE@
@@ -39,12 +40,13 @@ bin_PROGRAMS = util/ib_acme$(EXEEXT)
 sbin_PROGRAMS = svc/ibacm$(EXEEXT)
 subdir = .
 DIST_COMMON = README $(am__configure_deps) $(ibacminclude_HEADERS) \
-	$(srcdir)/Makefile.am $(srcdir)/Makefile.in \
-	$(srcdir)/config.h.in $(srcdir)/ibacm.init.in \
-	$(srcdir)/ibacm.spec.in $(top_srcdir)/configure AUTHORS \
-	COPYING ChangeLog INSTALL NEWS config/compile \
-	config/config.guess config/config.sub config/depcomp \
-	config/install-sh config/ltmain.sh config/missing
+	$(libibacmpinclude_HEADERS) $(srcdir)/Makefile.am \
+	$(srcdir)/Makefile.in $(srcdir)/config.h.in \
+	$(srcdir)/ibacm.init.in $(srcdir)/ibacm.spec.in \
+	$(top_srcdir)/configure AUTHORS COPYING ChangeLog INSTALL NEWS \
+	config/compile config/config.guess config/config.sub \
+	config/depcomp config/install-sh config/ltmain.sh \
+	config/missing
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -55,21 +57,51 @@ mkinstalldirs = $(install_sh) -d
 CONFIG_HEADER = config.h
 CONFIG_CLEAN_FILES = ibacm.spec ibacm.init
 CONFIG_CLEAN_VPATH_FILES =
-am__installdirs = "$(DESTDIR)$(bindir)" "$(DESTDIR)$(sbindir)" \
-	"$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man7dir)" \
-	"$(DESTDIR)$(ibacmincludedir)"
-PROGRAMS = $(bin_PROGRAMS) $(sbin_PROGRAMS)
+am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
+am__vpath_adj = case $$p in \
+    $(srcdir)/*) f=`echo "$$p" | sed "s|^$$srcdirstrip/||"`;; \
+    *) f=$$p;; \
+  esac;
+am__strip_dir = f=`echo $$p | sed -e 's|^.*/||'`;
+am__install_max = 40
+am__nobase_strip_setup = \
+  srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*|]/\\\\&/g'`
+am__nobase_strip = \
+  for p in $$list; do echo "$$p"; done | sed -e "s|$$srcdirstrip/||"
+am__nobase_list = $(am__nobase_strip_setup); \
+  for p in $$list; do echo "$$p $$p"; done | \
+  sed "s| $$srcdirstrip/| |;"' / .*\//!s/ .*/ ./; s,\( .*\)/[^/]*$$,\1,' | \
+  $(AWK) 'BEGIN { files["."] = "" } { files[$$2] = files[$$2] " " $$1; \
+    if (++n[$$2] == $(am__install_max)) \
+      { print $$2, files[$$2]; n[$$2] = 0; files[$$2] = "" } } \
+    END { for (dir in files) print dir, files[dir] }'
+am__base_list = \
+  sed '$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;s/\n/ /g' | \
+  sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
+am__installdirs = "$(DESTDIR)$(pkglibdir)" "$(DESTDIR)$(bindir)" \
+	"$(DESTDIR)$(sbindir)" "$(DESTDIR)$(man1dir)" \
+	"$(DESTDIR)$(man7dir)" "$(DESTDIR)$(ibacmincludedir)" \
+	"$(DESTDIR)$(libibacmpincludedir)"
+LTLIBRARIES = $(pkglib_LTLIBRARIES)
+lib_libibacmp_la_LIBADD =
 am__dirstamp = $(am__leading_dot)dirstamp
+am_lib_libibacmp_la_OBJECTS = prov/acmp/src/lib_libibacmp_la-acmp.lo
+lib_libibacmp_la_OBJECTS = $(am_lib_libibacmp_la_OBJECTS)
+AM_V_lt = $(am__v_lt_$(V))
+am__v_lt_ = $(am__v_lt_$(AM_DEFAULT_VERBOSITY))
+am__v_lt_0 = --silent
+lib_libibacmp_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
+	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
+	$(lib_libibacmp_la_CFLAGS) $(CFLAGS) \
+	$(lib_libibacmp_la_LDFLAGS) $(LDFLAGS) -o $@
+PROGRAMS = $(bin_PROGRAMS) $(sbin_PROGRAMS)
 am_svc_ibacm_OBJECTS = src/svc_ibacm-acm.$(OBJEXT) \
 	src/svc_ibacm-acm_util.$(OBJEXT)
 svc_ibacm_OBJECTS = $(am_svc_ibacm_OBJECTS)
 svc_ibacm_LDADD = $(LDADD)
-AM_V_lt = $(am__v_lt_$(V))
-am__v_lt_ = $(am__v_lt_$(AM_DEFAULT_VERBOSITY))
-am__v_lt_0 = --silent
 svc_ibacm_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(svc_ibacm_CFLAGS) \
-	$(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) -o $@
+	$(CFLAGS) $(svc_ibacm_LDFLAGS) $(LDFLAGS) -o $@
 am_util_ib_acme_OBJECTS = src/util_ib_acme-acme.$(OBJEXT) \
 	src/util_ib_acme-libacm.$(OBJEXT) \
 	linux/util_ib_acme-libacm_linux.$(OBJEXT) \
@@ -105,34 +137,15 @@ am__v_CCLD_0 = @echo "  CCLD  " $@;
 AM_V_GEN = $(am__v_GEN_$(V))
 am__v_GEN_ = $(am__v_GEN_$(AM_DEFAULT_VERBOSITY))
 am__v_GEN_0 = @echo "  GEN   " $@;
-SOURCES = $(svc_ibacm_SOURCES) $(util_ib_acme_SOURCES)
-DIST_SOURCES = $(svc_ibacm_SOURCES) $(util_ib_acme_SOURCES)
-am__vpath_adj_setup = srcdirstrip=`echo "$(srcdir)" | sed 's|.|.|g'`;
-am__vpath_adj = case $$p in \
-    $(srcdir)/*) f=`echo "$$p" | sed "s|^$$srcdirstrip/||"`;; \
-    *) f=$$p;; \
-  esac;
-am__strip_dir = f=`echo $$p | sed -e 's|^.*/||'`;
-am__install_max = 40
-am__nobase_strip_setup = \
-  srcdirstrip=`echo "$(srcdir)" | sed 's/[].[^$$\\*|]/\\\\&/g'`
-am__nobase_strip = \
-  for p in $$list; do echo "$$p"; done | sed -e "s|$$srcdirstrip/||"
-am__nobase_list = $(am__nobase_strip_setup); \
-  for p in $$list; do echo "$$p $$p"; done | \
-  sed "s| $$srcdirstrip/| |;"' / .*\//!s/ .*/ ./; s,\( .*\)/[^/]*$$,\1,' | \
-  $(AWK) 'BEGIN { files["."] = "" } { files[$$2] = files[$$2] " " $$1; \
-    if (++n[$$2] == $(am__install_max)) \
-      { print $$2, files[$$2]; n[$$2] = 0; files[$$2] = "" } } \
-    END { for (dir in files) print dir, files[dir] }'
-am__base_list = \
-  sed '$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;$$!N;s/\n/ /g' | \
-  sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
+SOURCES = $(lib_libibacmp_la_SOURCES) $(svc_ibacm_SOURCES) \
+	$(util_ib_acme_SOURCES)
+DIST_SOURCES = $(lib_libibacmp_la_SOURCES) $(svc_ibacm_SOURCES) \
+	$(util_ib_acme_SOURCES)
 man1dir = $(mandir)/man1
 man7dir = $(mandir)/man7
 NROFF = nroff
 MANS = $(man_MANS)
-HEADERS = $(ibacminclude_HEADERS)
+HEADERS = $(ibacminclude_HEADERS) $(libibacmpinclude_HEADERS)
 ETAGS = etags
 CTAGS = ctags
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
@@ -171,6 +184,9 @@ EGREP = @EGREP@
 EXEEXT = @EXEEXT@
 FGREP = @FGREP@
 GREP = @GREP@
+IBACM_BIN_PATH = @IBACM_BIN_PATH@
+IBACM_CONFIG_PATH = @IBACM_CONFIG_PATH@
+IBACM_LIB_PATH = @IBACM_LIB_PATH@
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_PROGRAM = @INSTALL_PROGRAM@
@@ -261,20 +277,36 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AM_CPPFLAGS = -I$(srcdir)/include -I$(srcdir)/linux -I$(srcdir)/src
-AM_CFLAGS = -g -Wall -D_GNU_SOURCE -DSYSCONFDIR=\"$(sysconfdir)\" -DBINDIR=\"$(bindir)\" -DRDMADIR=\"@rdmadir@\"
+AM_CFLAGS = -g -Wall -D_GNU_SOURCE 
+AM_LDFLAGS = -lpthread -ldl
+@HAVE_LD_VERSION_SCRIPT_FALSE@libibacmp_version_script = 
+@HAVE_LD_VERSION_SCRIPT_TRUE@libibacmp_version_script = -Wl,--version-script=$(srcdir)/prov/acmp/src/libibacmp.map
 svc_ibacm_SOURCES = src/acm.c src/acm_util.c
 util_ib_acme_SOURCES = src/acme.c src/libacm.c linux/libacm_linux.c src/parse.c
 svc_ibacm_CFLAGS = $(AM_CFLAGS)
+svc_ibacm_LDFLAGS = -rdynamic $(AM_LDFLAGS)
 util_ib_acme_CFLAGS = $(AM_CFLAGS) -DACME_PRINTS
+pkglib_LTLIBRARIES = lib/libibacmp.la
+lib_libibacmp_la_CFLAGS = $(AM_CFLAGS) 
+lib_libibacmp_la_SOURCES = prov/acmp/src/acmp.c  
+lib_libibacmp_la_LDFLAGS = -version-info 1 -export-dynamic \
+			   $(libibacmp_version_script) $(AM_LDFLAGS)
+
+lib_libibacmp_la_DEPENDENCIES = $(srcdir)/prov/acmp/src/libibacmp.map
 ibacmincludedir = $(includedir)/infiniband
-ibacminclude_HEADERS = include/infiniband/acm.h
+ibacminclude_HEADERS = include/infiniband/acm.h include/infiniband/acm_prov.h
+libibacmpincludedir = $(includedir)/infiniband
+libibacmpinclude_HEADERS = include/infiniband/acm.h include/infiniband/acm_prov.h
 man_MANS = \
 	man/ib_acme.1 \
 	man/ibacm.1 \
-	man/ibacm.7
+	man/ibacm.7 \
+	man/ibacm_prov.7
 
-EXTRA_DIST = src/acm_util.h src/acm_mad.h src/libacm.h ibacm.init.in \
-	     linux/osd.h linux/dlist.h ibacm.spec.in $(man_MANS) ibacm_hosts.data
+EXTRA_DIST = src/acm_util.h prov/acmp/src/libibacmp.map \
+		include/acm_mad.h src/libacm.h ibacm.init.in \
+		linux/osd.h linux/dlist.h ibacm.spec.in \
+		$(man_MANS) ibacm_hosts.data
 
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-am
@@ -336,6 +368,50 @@ ibacm.spec: $(top_builddir)/config.status $(srcdir)/ibacm.spec.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
 ibacm.init: $(top_builddir)/config.status $(srcdir)/ibacm.init.in
 	cd $(top_builddir) && $(SHELL) ./config.status $@
+install-pkglibLTLIBRARIES: $(pkglib_LTLIBRARIES)
+	@$(NORMAL_INSTALL)
+	test -z "$(pkglibdir)" || $(MKDIR_P) "$(DESTDIR)$(pkglibdir)"
+	@list='$(pkglib_LTLIBRARIES)'; test -n "$(pkglibdir)" || list=; \
+	list2=; for p in $$list; do \
+	  if test -f $$p; then \
+	    list2="$$list2 $$p"; \
+	  else :; fi; \
+	done; \
+	test -z "$$list2" || { \
+	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 '$(DESTDIR)$(pkglibdir)'"; \
+	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=install $(INSTALL) $(INSTALL_STRIP_FLAG) $$list2 "$(DESTDIR)$(pkglibdir)"; \
+	}
+
+uninstall-pkglibLTLIBRARIES:
+	@$(NORMAL_UNINSTALL)
+	@list='$(pkglib_LTLIBRARIES)'; test -n "$(pkglibdir)" || list=; \
+	for p in $$list; do \
+	  $(am__strip_dir) \
+	  echo " $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f '$(DESTDIR)$(pkglibdir)/$$f'"; \
+	  $(LIBTOOL) $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=uninstall rm -f "$(DESTDIR)$(pkglibdir)/$$f"; \
+	done
+
+clean-pkglibLTLIBRARIES:
+	-test -z "$(pkglib_LTLIBRARIES)" || rm -f $(pkglib_LTLIBRARIES)
+	@list='$(pkglib_LTLIBRARIES)'; for p in $$list; do \
+	  dir="`echo $$p | sed -e 's|/[^/]*$$||'`"; \
+	  test "$$dir" != "$$p" || dir=.; \
+	  echo "rm -f \"$${dir}/so_locations\""; \
+	  rm -f "$${dir}/so_locations"; \
+	done
+prov/acmp/src/$(am__dirstamp):
+	@$(MKDIR_P) prov/acmp/src
+	@: > prov/acmp/src/$(am__dirstamp)
+prov/acmp/src/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) prov/acmp/src/$(DEPDIR)
+	@: > prov/acmp/src/$(DEPDIR)/$(am__dirstamp)
+prov/acmp/src/lib_libibacmp_la-acmp.lo: prov/acmp/src/$(am__dirstamp) \
+	prov/acmp/src/$(DEPDIR)/$(am__dirstamp)
+lib/$(am__dirstamp):
+	@$(MKDIR_P) lib
+	@: > lib/$(am__dirstamp)
+lib/libibacmp.la: $(lib_libibacmp_la_OBJECTS) $(lib_libibacmp_la_DEPENDENCIES) lib/$(am__dirstamp)
+	$(AM_V_CCLD)$(lib_libibacmp_la_LINK) -rpath $(pkglibdir) $(lib_libibacmp_la_OBJECTS) $(lib_libibacmp_la_LIBADD) $(LIBS)
 install-binPROGRAMS: $(bin_PROGRAMS)
 	@$(NORMAL_INSTALL)
 	test -z "$(bindir)" || $(MKDIR_P) "$(DESTDIR)$(bindir)"
@@ -462,6 +538,8 @@ util/ib_acme$(EXEEXT): $(util_ib_acme_OBJECTS) $(util_ib_acme_DEPENDENCIES) util
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f linux/util_ib_acme-libacm_linux.$(OBJEXT)
+	-rm -f prov/acmp/src/lib_libibacmp_la-acmp.$(OBJEXT)
+	-rm -f prov/acmp/src/lib_libibacmp_la-acmp.lo
 	-rm -f src/svc_ibacm-acm.$(OBJEXT)
 	-rm -f src/svc_ibacm-acm_util.$(OBJEXT)
 	-rm -f src/util_ib_acme-acme.$(OBJEXT)
@@ -472,6 +550,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@linux/$(DEPDIR)/util_ib_acme-libacm_linux.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@prov/acmp/src/$(DEPDIR)/lib_libibacmp_la-acmp.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/svc_ibacm-acm.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/svc_ibacm-acm_util.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@src/$(DEPDIR)/util_ib_acme-acme.Po@am__quote@
@@ -504,6 +583,14 @@ distclean-compile:
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	source='$<' object='$@' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(LTCOMPILE) -c -o $@ $<
+
+prov/acmp/src/lib_libibacmp_la-acmp.lo: prov/acmp/src/acmp.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(lib_libibacmp_la_CFLAGS) $(CFLAGS) -MT prov/acmp/src/lib_libibacmp_la-acmp.lo -MD -MP -MF prov/acmp/src/$(DEPDIR)/lib_libibacmp_la-acmp.Tpo -c -o prov/acmp/src/lib_libibacmp_la-acmp.lo `test -f 'prov/acmp/src/acmp.c' || echo '$(srcdir)/'`prov/acmp/src/acmp.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) prov/acmp/src/$(DEPDIR)/lib_libibacmp_la-acmp.Tpo prov/acmp/src/$(DEPDIR)/lib_libibacmp_la-acmp.Plo
+@am__fastdepCC_FALSE@	$(AM_V_CC) @AM_BACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	source='prov/acmp/src/acmp.c' object='prov/acmp/src/lib_libibacmp_la-acmp.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(lib_libibacmp_la_CFLAGS) $(CFLAGS) -c -o prov/acmp/src/lib_libibacmp_la-acmp.lo `test -f 'prov/acmp/src/acmp.c' || echo '$(srcdir)/'`prov/acmp/src/acmp.c
 
 src/svc_ibacm-acm.o: src/acm.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(svc_ibacm_CFLAGS) $(CFLAGS) -MT src/svc_ibacm-acm.o -MD -MP -MF src/$(DEPDIR)/svc_ibacm-acm.Tpo -c -o src/svc_ibacm-acm.o `test -f 'src/acm.c' || echo '$(srcdir)/'`src/acm.c
@@ -606,6 +693,8 @@ mostlyclean-libtool:
 
 clean-libtool:
 	-rm -rf .libs _libs
+	-rm -rf lib/.libs lib/_libs
+	-rm -rf prov/acmp/src/.libs prov/acmp/src/_libs
 	-rm -rf svc/.libs svc/_libs
 	-rm -rf util/.libs util/_libs
 
@@ -707,6 +796,26 @@ uninstall-ibacmincludeHEADERS:
 	test -n "$$files" || exit 0; \
 	echo " ( cd '$(DESTDIR)$(ibacmincludedir)' && rm -f" $$files ")"; \
 	cd "$(DESTDIR)$(ibacmincludedir)" && rm -f $$files
+install-libibacmpincludeHEADERS: $(libibacmpinclude_HEADERS)
+	@$(NORMAL_INSTALL)
+	test -z "$(libibacmpincludedir)" || $(MKDIR_P) "$(DESTDIR)$(libibacmpincludedir)"
+	@list='$(libibacmpinclude_HEADERS)'; test -n "$(libibacmpincludedir)" || list=; \
+	for p in $$list; do \
+	  if test -f "$$p"; then d=; else d="$(srcdir)/"; fi; \
+	  echo "$$d$$p"; \
+	done | $(am__base_list) | \
+	while read files; do \
+	  echo " $(INSTALL_HEADER) $$files '$(DESTDIR)$(libibacmpincludedir)'"; \
+	  $(INSTALL_HEADER) $$files "$(DESTDIR)$(libibacmpincludedir)" || exit $$?; \
+	done
+
+uninstall-libibacmpincludeHEADERS:
+	@$(NORMAL_UNINSTALL)
+	@list='$(libibacmpinclude_HEADERS)'; test -n "$(libibacmpincludedir)" || list=; \
+	files=`for p in $$list; do echo $$p; done | sed -e 's|^.*/||'`; \
+	test -n "$$files" || exit 0; \
+	echo " ( cd '$(DESTDIR)$(libibacmpincludedir)' && rm -f" $$files ")"; \
+	cd "$(DESTDIR)$(libibacmpincludedir)" && rm -f $$files
 
 ID: $(HEADERS) $(SOURCES) $(LISP) $(TAGS_FILES)
 	list='$(SOURCES) $(HEADERS) $(LISP) $(TAGS_FILES)'; \
@@ -925,9 +1034,10 @@ distcleancheck: distclean
 	       exit 1; } >&2
 check-am: all-am
 check: check-am
-all-am: Makefile $(PROGRAMS) $(MANS) $(HEADERS) config.h
+all-am: Makefile $(LTLIBRARIES) $(PROGRAMS) $(MANS) $(HEADERS) \
+		config.h
 installdirs:
-	for dir in "$(DESTDIR)$(bindir)" "$(DESTDIR)$(sbindir)" "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man7dir)" "$(DESTDIR)$(ibacmincludedir)"; do \
+	for dir in "$(DESTDIR)$(pkglibdir)" "$(DESTDIR)$(bindir)" "$(DESTDIR)$(sbindir)" "$(DESTDIR)$(man1dir)" "$(DESTDIR)$(man7dir)" "$(DESTDIR)$(ibacmincludedir)" "$(DESTDIR)$(libibacmpincludedir)"; do \
 	  test -z "$$dir" || $(MKDIR_P) "$$dir"; \
 	done
 install: install-am
@@ -951,8 +1061,11 @@ clean-generic:
 distclean-generic:
 	-test -z "$(CONFIG_CLEAN_FILES)" || rm -f $(CONFIG_CLEAN_FILES)
 	-test . = "$(srcdir)" || test -z "$(CONFIG_CLEAN_VPATH_FILES)" || rm -f $(CONFIG_CLEAN_VPATH_FILES)
+	-rm -f lib/$(am__dirstamp)
 	-rm -f linux/$(DEPDIR)/$(am__dirstamp)
 	-rm -f linux/$(am__dirstamp)
+	-rm -f prov/acmp/src/$(DEPDIR)/$(am__dirstamp)
+	-rm -f prov/acmp/src/$(am__dirstamp)
 	-rm -f src/$(DEPDIR)/$(am__dirstamp)
 	-rm -f src/$(am__dirstamp)
 	-rm -f svc/$(am__dirstamp)
@@ -964,11 +1077,11 @@ maintainer-clean-generic:
 clean: clean-am
 
 clean-am: clean-binPROGRAMS clean-generic clean-libtool \
-	clean-sbinPROGRAMS mostlyclean-am
+	clean-pkglibLTLIBRARIES clean-sbinPROGRAMS mostlyclean-am
 
 distclean: distclean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
-	-rm -rf linux/$(DEPDIR) src/$(DEPDIR)
+	-rm -rf linux/$(DEPDIR) prov/acmp/src/$(DEPDIR) src/$(DEPDIR)
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-hdr distclean-libtool distclean-tags
@@ -985,13 +1098,15 @@ info: info-am
 
 info-am:
 
-install-data-am: install-ibacmincludeHEADERS install-man
+install-data-am: install-ibacmincludeHEADERS \
+	install-libibacmpincludeHEADERS install-man
 
 install-dvi: install-dvi-am
 
 install-dvi-am:
 
-install-exec-am: install-binPROGRAMS install-sbinPROGRAMS
+install-exec-am: install-binPROGRAMS install-pkglibLTLIBRARIES \
+	install-sbinPROGRAMS
 	@$(NORMAL_INSTALL)
 	$(MAKE) $(AM_MAKEFLAGS) install-exec-hook
 install-html: install-html-am
@@ -1017,7 +1132,7 @@ installcheck-am:
 maintainer-clean: maintainer-clean-am
 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
 	-rm -rf $(top_srcdir)/autom4te.cache
-	-rm -rf linux/$(DEPDIR) src/$(DEPDIR)
+	-rm -rf linux/$(DEPDIR) prov/acmp/src/$(DEPDIR) src/$(DEPDIR)
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
@@ -1035,7 +1150,8 @@ ps: ps-am
 ps-am:
 
 uninstall-am: uninstall-binPROGRAMS uninstall-ibacmincludeHEADERS \
-	uninstall-man uninstall-sbinPROGRAMS
+	uninstall-libibacmpincludeHEADERS uninstall-man \
+	uninstall-pkglibLTLIBRARIES uninstall-sbinPROGRAMS
 
 uninstall-man: uninstall-man1 uninstall-man7
 
@@ -1043,23 +1159,26 @@ uninstall-man: uninstall-man1 uninstall-man7
 
 .PHONY: CTAGS GTAGS all all-am am--refresh check check-am clean \
 	clean-binPROGRAMS clean-generic clean-libtool \
-	clean-sbinPROGRAMS ctags dist dist-all dist-bzip2 dist-gzip \
-	dist-hook dist-lzma dist-shar dist-tarZ dist-xz dist-zip \
-	distcheck distclean distclean-compile distclean-generic \
-	distclean-hdr distclean-libtool distclean-tags distcleancheck \
-	distdir distuninstallcheck dvi dvi-am html html-am info \
-	info-am install install-am install-binPROGRAMS install-data \
-	install-data-am install-dvi install-dvi-am install-exec \
-	install-exec-am install-exec-hook install-html install-html-am \
-	install-ibacmincludeHEADERS install-info install-info-am \
+	clean-pkglibLTLIBRARIES clean-sbinPROGRAMS ctags dist dist-all \
+	dist-bzip2 dist-gzip dist-hook dist-lzma dist-shar dist-tarZ \
+	dist-xz dist-zip distcheck distclean distclean-compile \
+	distclean-generic distclean-hdr distclean-libtool \
+	distclean-tags distcleancheck distdir distuninstallcheck dvi \
+	dvi-am html html-am info info-am install install-am \
+	install-binPROGRAMS install-data install-data-am install-dvi \
+	install-dvi-am install-exec install-exec-am install-exec-hook \
+	install-html install-html-am install-ibacmincludeHEADERS \
+	install-info install-info-am install-libibacmpincludeHEADERS \
 	install-man install-man1 install-man7 install-pdf \
-	install-pdf-am install-ps install-ps-am install-sbinPROGRAMS \
-	install-strip installcheck installcheck-am installdirs \
-	maintainer-clean maintainer-clean-generic mostlyclean \
-	mostlyclean-compile mostlyclean-generic mostlyclean-libtool \
-	pdf pdf-am ps ps-am tags uninstall uninstall-am \
-	uninstall-binPROGRAMS uninstall-ibacmincludeHEADERS \
-	uninstall-man uninstall-man1 uninstall-man7 \
+	install-pdf-am install-pkglibLTLIBRARIES install-ps \
+	install-ps-am install-sbinPROGRAMS install-strip installcheck \
+	installcheck-am installdirs maintainer-clean \
+	maintainer-clean-generic mostlyclean mostlyclean-compile \
+	mostlyclean-generic mostlyclean-libtool pdf pdf-am ps ps-am \
+	tags uninstall uninstall-am uninstall-binPROGRAMS \
+	uninstall-ibacmincludeHEADERS \
+	uninstall-libibacmpincludeHEADERS uninstall-man uninstall-man1 \
+	uninstall-man7 uninstall-pkglibLTLIBRARIES \
 	uninstall-sbinPROGRAMS
 
 

@@ -39,6 +39,15 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #undef HAVE_UNISTD_H
 
+/* Define the path to bin directory */
+#undef IBACM_BIN_PATH
+
+/* Define the path to configurations */
+#undef IBACM_CONFIG_PATH
+
+/* Define the path to the provider lib directory */
+#undef IBACM_LIB_PATH
+
 /* Define to the sub-directory in which libtool stores uninstalled libraries.
    */
 #undef LT_OBJDIR

@@ -1,0 +1,84 @@
+From ca06ad48f7020abb82684d83b0fe1c4120648648 Mon Sep 17 00:00:00 2001
+From: Michal Schmidt <mschmidt@redhat.com>
+Date: Fri, 17 Jul 2015 13:49:21 +0200
+Subject: [PATCH 1/2] Coverity and compile warning fixes
+
+From: Doug Ledford <dledford@redhat.com>
+
+Signed-off-by: Doug Ledford <dledford@redhat.com>
+
+[ rebased to 1.0.10~ -- mschmidt ]
+---
+ prov/acmp/src/acmp.c | 9 +++++----
+ src/acm.c            | 4 ++--
+ src/acme.c           | 4 ++--
+ 3 files changed, 9 insertions(+), 8 deletions(-)
+
+diff --git a/prov/acmp/src/acmp.c b/prov/acmp/src/acmp.c
+index 2b85958a4d..0f9ebcd57c 100644
+--- a/prov/acmp/src/acmp.c
++++ b/prov/acmp/src/acmp.c
+@@ -262,8 +262,8 @@ PER_THREAD char log_data[ACM_MAX_ADDRESS];
+ /*
+  * Service options - may be set through ibacm_opts.cfg file.
+  */
+-static char route_data_file[128] = ACM_CONF_DIR "/ibacm_route.data";
+-static char addr_data_file[128] = ACM_CONF_DIR "/ibacm_hosts.data";
++static char route_data_file[256] = ACM_CONF_DIR "/ibacm_route.data";
++static char addr_data_file[256] = ACM_CONF_DIR "/ibacm_hosts.data";
+ static enum acmp_addr_prot addr_prot = ACMP_ADDR_PROT_ACM;
+ static int addr_timeout = 1440;
+ static enum acmp_route_prot route_prot = ACMP_ROUTE_PROT_SA;
+@@ -2081,8 +2081,9 @@ static int acmp_parse_osm_fullv1_paths(FILE *f, uint64_t *lid2guid, struct acmp_
+ 		if (lid != ep->port->lid)
+ 			continue;
+ 
+-		ibv_query_port(ep->port->dev->verbs, ep->port->port_num, &attr);
+-		ret = 0;
++		ret = ibv_query_port(ep->port->dev->verbs, ep->port->port_num, &attr);
++		if (ret < 0)
++			return ret;
+ 		break;
+ 	}
+ 
+diff --git a/src/acm.c b/src/acm.c
+index 76497252c7..408c61c1df 100644
+--- a/src/acm.c
++++ b/src/acm.c
+@@ -189,9 +189,9 @@ static struct sa_data {
+ static char *acme = IBACM_BIN_PATH "/ib_acme -A";
+ static char *opts_file = ACM_CONF_DIR "/" ACM_OPTS_FILE;
+ static char *addr_file = ACM_CONF_DIR "/" ACM_ADDR_FILE;
+-static char log_file[128] = "/var/log/ibacm.log";
++static char log_file[256] = "/var/log/ibacm.log";
+ static int log_level = 0;
+-static char lock_file[128] = "/var/run/ibacm.pid";
++static char lock_file[256] = "/var/run/ibacm.pid";
+ static short server_port = 6125;
+ static int support_ips_in_addr_cfg = 0;
+ static char prov_lib_path[256] = IBACM_LIB_PATH;
+diff --git a/src/acme.c b/src/acme.c
+index f1b0d01062..7f718be17e 100644
+--- a/src/acme.c
++++ b/src/acme.c
+@@ -938,7 +938,7 @@ static int query_svcs(void)
+ 	for (i = 0; svc_list[i]; i++) {
+ 		ret = ib_acm_connect(svc_list[i]);
+ 		if (ret) {
+-			printf("%s,unable to contact service: %s\n",
++			printf("%s, unable to contact service: %s\n",
+ 				svc_list[i], strerror(errno));
+ 			continue;
+ 		}
+@@ -956,7 +956,7 @@ static int query_svcs(void)
+ 	}
+ 
+ 	free(svc_list);
+-	return ret;
++	return 0;
+ }
+ 
+ char *opt_arg(int argc, char **argv)
+-- 
+2.4.3
+

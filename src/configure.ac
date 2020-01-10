@@ -1,14 +1,14 @@
 dnl Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.63])
-AC_INIT([ibacm], [1.0.9], [linux-rdma@vger.kernel.org])
+AC_INIT([ibacm], [1.1.0], [linux-rdma@vger.kernel.org])
 AC_CONFIG_SRCDIR([src/acm.c])
 AC_CONFIG_AUX_DIR(config)
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-LT_INIT
+LT_INIT(disable-static)
 
 AC_ARG_ENABLE(libcheck, [  --disable-libcheck  do not test for presence of ib libraries],
 [       if test "$enableval" = "no"; then
@@ -30,6 +30,27 @@ AC_CHECK_LIB(ibverbs, ibv_get_device_list, [],
 AC_CHECK_LIB(ibumad, umad_send, [],
     AC_MSG_ERROR([umad_send() not found.  ibacm requires libibumad.]))
 fi
+
+dnl Define a configure directory
+IBACM_CONFIG_PATH_TMP1="`eval echo ${sysconfdir}`"
+IBACM_CONFIG_PATH_TMP2="`echo $IBACM_CONFIG_PATH_TMP1 | sed 's/^NONE/$ac_default_prefix/'`"
+IBACM_CONFIG_PATH="`eval echo $IBACM_CONFIG_PATH_TMP2`/rdma"
+AC_SUBST(IBACM_CONFIG_PATH)
+AC_DEFINE_UNQUOTED([IBACM_CONFIG_PATH], "$IBACM_CONFIG_PATH", [Define the path to configurations])
+
+dnl Define the bin directory
+IBACM_BIN_PATH_TMP1="`eval echo ${bindir}`"
+IBACM_BIN_PATH_TMP2="`echo $IBACM_BIN_PATH_TMP1 | sed 's/^NONE/$ac_default_prefix/'`"
+IBACM_BIN_PATH="`eval echo $IBACM_BIN_PATH_TMP2`"
+AC_SUBST(IBACM_BIN_PATH)
+AC_DEFINE_UNQUOTED([IBACM_BIN_PATH], "$IBACM_BIN_PATH", [Define the path to bin directory])
+
+dnl Define the lib directory
+IBACM_LIB_PATH_TMP1="`eval echo ${libdir}`"
+IBACM_LIB_PATH_TMP2="`echo $IBACM_LIB_PATH_TMP1 | sed 's/^NONE/$ac_default_prefix/'`"
+IBACM_LIB_PATH="`eval echo $IBACM_LIB_PATH_TMP2`/ibacm"
+AC_SUBST(IBACM_LIB_PATH)
+AC_DEFINE_UNQUOTED([IBACM_LIB_PATH], "$IBACM_LIB_PATH", [Define the path to the provider lib directory])
 
 dnl Checks for header files.
 AC_HEADER_STDC

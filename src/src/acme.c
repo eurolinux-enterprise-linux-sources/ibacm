@@ -58,11 +58,16 @@ static char addr_type = 'u';
 static int verify;
 static int nodelay;
 static int repetitions = 1;
+static int ep_index;
+static int enum_ep;
 
 enum perf_query_output {
 	PERF_QUERY_NONE,
 	PERF_QUERY_ROW,
-	PERF_QUERY_COL
+	PERF_QUERY_COL,
+	PERF_QUERY_EP_INDEX,
+	PERF_QUERY_EP_ALL,
+	PERF_QUERY_EP_ADDR
 };
 static enum perf_query_output perf_query;
 int verbose;
@@ -79,13 +84,22 @@ static void show_usage(char *program)
 {
 	printf("usage 1: %s\n", program);
 	printf("Query specified ibacm service for data\n");
+	printf("   [-e [N]]         - display one or all endpoints:\n");
+	printf("                        No index: all endpoints\n");
+	printf("                        N: endpoint N (N = 1, 2, ...)\n");
 	printf("   [-f addr_format] - i(p), n(ame), l(id), g(gid), or u(nspecified)\n");
 	printf("                      address format for -s and -d options, default: 'u'\n");
 	printf("   [-s src_addr]    - source address for path queries\n");
 	printf("   [-d dest_addr]   - destination addresses for path queries\n");
 	printf("   [-v]             - verify ACM response against SA query response\n");
 	printf("   [-c]             - read ACM cached data only\n");
-	printf("   [-P]             - query performance data from destination service\n");
+	printf("   [-P [opt]]       - query performance data from destination service:\n");
+	printf("                        No option: output combined data in row format.\n");
+	printf("                        col: output combined data in colum format.\n");
+	printf("                        N: output data for endpoint N (N = 1, 2,...)\n");
+	printf("                        all: output data for all endpoints\n");
+	printf("                        s: output data for the endpoint with the\n");
+	printf("                           address specified in -s option\n");
 	printf("   [-S svc_addr]    - address of ACM service, default: local service\n");
 	printf("   [-C repetitions] - repeat count for resolution\n");
 	printf("usage 2: %s\n", program);
@@ -261,7 +275,7 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "# Specifies the location of the route data file to use when preloading\n");
 	fprintf(f, "# the ACM cache.  This option is only valid if route_preload\n");
 	fprintf(f, "# indicates that routing data should be read from a file.\n");
-	fprintf(f, "# Default is ACM_CONF_DIR/ibacm_route.data\n");
+	fprintf(f, "# Default is %s/ibacm_route.data\n", ACM_CONF_DIR);
 	fprintf(f, "# route_data_file /etc/rdma/ibacm_route.data\n");
 	fprintf(f, "\n");
 	fprintf(f, "# addr_preload:\n");
@@ -277,13 +291,28 @@ static void gen_opts_temp(FILE *f)
 	fprintf(f, "# Specifies the location of the address data file to use when preloading\n");
 	fprintf(f, "# the ACM cache.  This option is only valid if addr_preload\n");
 	fprintf(f, "# indicates that address data should be read from a file.\n");
-	fprintf(f, "# Default is ACM_CONF_DIR/ibacm_hosts.data\n");
+	fprintf(f, "# Default is %s/ibacm_hosts.data\n", ACM_CONF_DIR);
 	fprintf(f, "# addr_data_file /etc/rdma/ibacm_hosts.data\n");
 	fprintf(f, "\n");
 	fprintf(f, "# support_ips_in_addr_cfg:\n");
 	fprintf(f, "# If 1 continue to read IP addresses from ibacm_addr.cfg\n");
 	fprintf(f, "# Default is 0 \"no\"\n");
 	fprintf(f, "# support_ips_in_addr_cfg 0\n");
+	fprintf(f, "\n");
+	fprintf(f, "# provider_lib_path:\n");
+	fprintf(f, "# Specifies the directory of the provider libraries\n");
+	fprintf(f, "\n");
+	fprintf(f, "# provider_lib_path %s\n", IBACM_LIB_PATH);
+	fprintf(f, "\n");
+	fprintf(f, "# provider:\n");
+	fprintf(f, "# Specifies the provider to assign to each subnet\n");
+	fprintf(f, "# ACM providers may override the address and route resolution\n");
+	fprintf(f, "# protocols with provider specific protocols.\n");
+	fprintf(f, "# provider name (prefix | default)\n");
+	fprintf(f, "# Example:\n");
+	fprintf(f, "# provider ibacmp 0xFE80000000000000\n");
+	fprintf(f, "# provider ibacmp default\n");
+	fprintf(f, "\n");
 }
 
 static int open_dir(void)
@@ -506,7 +535,7 @@ static int inet_any_pton(char *addr, struct sockaddr *sa)
 	if (ret <= 0) {
 		sin6 = (struct sockaddr_in6 *) sa;
 		sa->sa_family = AF_INET6;
-		ret = inet_pton(AF_INET6, src_addr, &sin6->sin6_addr);
+		ret = inet_pton(AF_INET6, addr, &sin6->sin6_addr);
 	}
 
 	return ret;
@@ -728,24 +757,107 @@ static void resolve(char *svc)
 	free(dest_list);
 }
 
-static void query_perf(char *svc)
+static int query_perf_ip(uint64_t **counters, int *cnt)
 {
-	static int lables;
+	union _sockaddr {
+		struct sockaddr_storage src;
+		struct sockaddr saddr;
+	} addr;
+	uint8_t type;
+	struct sockaddr_in *sin;
+	struct sockaddr_in6 *sin6;
+	int ret;
+
+	VPRINT("%s: src_addr %s\n", __FUNCTION__, src_addr);
+	addr.saddr.sa_family = AF_INET;
+	sin = (struct sockaddr_in *) &addr.saddr;
+	ret = inet_pton(AF_INET, src_addr, &sin->sin_addr);
+	if (ret <= 0) {
+		addr.saddr.sa_family = AF_INET6;
+		sin6 = (struct sockaddr_in6 *)&addr.saddr;
+		ret = inet_pton(AF_INET6, src_addr, &sin6->sin6_addr);
+		if (ret <= 0) {
+			printf("inet_pton error on src address (%s): 0x%x\n",
+			       src_addr, ret);
+			return -1;
+		}
+		type = ACM_EP_INFO_ADDRESS_IP6;
+	} else {
+		type = ACM_EP_INFO_ADDRESS_IP;
+	}
+
+	ret = ib_acm_query_perf_ep_addr((uint8_t *)&addr.src, type, counters,
+					 cnt);
+	if (ret) {
+		printf("ib_acm_query_perf failed: %s\n", strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+static int query_perf_name(uint64_t **counters, int *cnt)
+{
+	int ret;
+
+	VPRINT("%s: src_addr %s\n", __FUNCTION__, src_addr);
+	ret = ib_acm_query_perf_ep_addr((uint8_t *)src_addr, ACM_EP_INFO_NAME,
+					 counters, cnt);
+	if (ret) {
+		printf("ib_acm_query_perf failed: %s\n", strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+static int query_perf_ep_addr(uint64_t **counters, int *cnt)
+{
+	int ret;
+	char src_type;
+
+	src_addr = get_dest(src_arg, &src_type);
+	switch (src_type) {
+	case 'i':
+		ret = query_perf_ip(counters, cnt);
+		break;
+	case 'n':
+		ret = query_perf_name(counters, cnt);
+		break;
+	default:
+		printf("Unsupported src_type %d\n", src_type);
+		return -1;
+	}
+
+	return ret;
+}
+
+static int query_perf_one(char *svc, int index)
+{
+	static int labels;
 	int ret, cnt, i;
 	uint64_t *counters;
 
-	ret = ib_acm_query_perf(&counters, &cnt);
+	if (perf_query == PERF_QUERY_EP_ADDR)
+		ret = query_perf_ep_addr(&counters, &cnt);
+	else
+		ret = ib_acm_query_perf(index, &counters, &cnt);
+
 	if (ret) {
-		printf("%s: Failed to query perf data %s\n", svc, strerror(errno));
-		return;
+		if (perf_query != PERF_QUERY_EP_ALL) {
+			printf("%s: Failed to query perf data: %s\n", svc,
+			       strerror(errno));
+		}
+		return ret;
 	}
 
-	if (perf_query == PERF_QUERY_ROW) {
-		if (!lables) {
+	if (perf_query != PERF_QUERY_COL) {
+		if (!labels) {
+			printf("svc,");
 			for (i = 0; i < cnt - 1; i++)
 				printf("%s,", ib_acm_cntr_name(i));
 			printf("%s\n", ib_acm_cntr_name(i));
-			lables = 1;
+			labels = 1;
 		}
 		printf("%s,", svc);
 		for (i = 0; i < cnt - 1; i++)
@@ -759,6 +871,57 @@ static void query_perf(char *svc)
 		}
 	}
 	ib_acm_free_perf(counters);
+
+	return 0;
+}
+
+static void query_perf(char *svc)
+{
+	int index = 1;
+
+	if (perf_query != PERF_QUERY_EP_ALL) {
+		query_perf_one(svc, ep_index);
+	}
+	else {
+		while (!query_perf_one(svc, index++));
+	}
+}
+
+static int enumerate_ep(char *svc, int index)
+{
+	static int labels;
+	int ret, i;
+	struct acm_ep_config_data *ep_data;
+
+	ret = ib_acm_enum_ep(index, &ep_data);
+	if (ret) 
+		return ret;
+
+	if (!labels) {
+		printf("svc,guid,port,pkey,ep_index,prov,addr_0,addresses\n");
+		labels = 1;
+	}
+
+	printf("%s,0x%016lx,%d,0x%04x,%d,%s", svc, ep_data->dev_guid,
+	       ep_data->port_num, ep_data->pkey, index, ep_data->prov_name);
+	for (i = 0; i < ep_data->addr_cnt; i++) 
+		printf(",%s", ep_data->addrs[i].name);
+	printf("\n");
+	ib_acm_free_ep_data(ep_data);
+
+	return 0;
+}
+
+static void enumerate_eps(char *svc)
+{
+	int index = 1;
+
+	if (ep_index > 0) {
+		if (enumerate_ep(svc, ep_index))
+			printf(" Endpoint %d is not available\n", ep_index);
+	} else {
+		while (!enumerate_ep(svc, index++));
+	}
 }
 
 static int query_svcs(void)
@@ -786,6 +949,9 @@ static int query_svcs(void)
 		if (perf_query)
 			query_perf(svc_list[i]);
 
+		if (enum_ep) 
+			enumerate_eps(svc_list[i]);
+
 		ib_acm_disconnect();
 	}
 
@@ -804,6 +970,23 @@ char *opt_arg(int argc, char **argv)
 	return NULL;
 }
 
+void parse_perf_arg(char *arg)
+{
+	if (!strnicmp("col", arg, 3)) {
+		perf_query = PERF_QUERY_COL;
+	} else if (!strnicmp("all", arg, 3)) {
+		perf_query = PERF_QUERY_EP_ALL;
+	} else if (!strcmp("s", arg)) {
+		perf_query = PERF_QUERY_EP_ADDR;
+	} else {
+		ep_index = atoi(arg);
+		if (ep_index > 0) 
+			perf_query = PERF_QUERY_EP_INDEX;
+		else
+			perf_query = PERF_QUERY_ROW;
+	}
+}
+
 int CDECL_FUNC main(int argc, char **argv)
 {
 	int op, ret;
@@ -814,8 +997,13 @@ int CDECL_FUNC main(int argc, char **argv)
 	if (ret)
 		goto out;
 
-	while ((op = getopt(argc, argv, "f:s:d:vcA::O::D:P::S:C:V")) != -1) {
+	while ((op = getopt(argc, argv, "e::f:s:d:vcA::O::D:P::S:C:V")) != -1) {
 		switch (op) {
+		case 'e':
+			enum_ep = 1;
+			if (opt_arg(argc, argv))
+				ep_index = atoi(opt_arg(argc, argv));
+			break;
 		case 'f':
 			addr_type = optarg[0];
 			if (addr_type != 'i' && addr_type != 'n' &&
@@ -848,8 +1036,8 @@ int CDECL_FUNC main(int argc, char **argv)
 			dest_dir = optarg;
 			break;
 		case 'P':
-			if (opt_arg(argc, argv) && !strnicmp("col", opt_arg(argc, argv), 3))
-				perf_query = PERF_QUERY_COL;
+			if (opt_arg(argc, argv))
+				parse_perf_arg(opt_arg(argc, argv));
 			else
 				perf_query = PERF_QUERY_ROW;
 			break;
@@ -869,11 +1057,13 @@ int CDECL_FUNC main(int argc, char **argv)
 		}
 	}
 
-	if ((src_arg && !dest_arg) ||
-	    (!src_arg && !dest_arg && !perf_query && !make_addr && !make_opts))
+	if ((src_arg && (!dest_arg && perf_query != PERF_QUERY_EP_ADDR)) ||
+	    (perf_query == PERF_QUERY_EP_ADDR && !src_arg) || 
+	    (!src_arg && !dest_arg && !perf_query && !make_addr && !make_opts &&
+	     !enum_ep))
 		goto show_use;
 
-	if (dest_arg || perf_query)
+	if (dest_arg || perf_query || enum_ep)
 		ret = query_svcs();
 
 	if (!ret && make_addr)
